@@ -1,6 +1,7 @@
 "use client";
 
 import { Capacitor } from "@capacitor/core";
+import { isIosShell } from "@/lib/ios-shell";
 import type { Platform } from "@/lib/store";
 
 const TV_UA =
@@ -43,6 +44,17 @@ function isNativeShell(): boolean {
 }
 
 /**
+ * The iOS app (native/xtool SwiftUI shell) is not a Capacitor app, so
+ * `Capacitor.isNativePlatform()` is false there. It injects
+ * `window.StreamKaroNative` instead — treat it exactly like the Android shell
+ * (no service-worker install nags, no browser-history back guard, "Exit?" at
+ * the root) so one code path covers both native shells.
+ */
+function isAnyNativeShell(): boolean {
+  return isNativeShell() || isIosShell();
+}
+
+/**
  * Best synchronous guess, used for the first paint:
  * - Android shell: TV when the device has no touch screen (TV boxes / sticks)
  * - Electron: desktop
@@ -53,7 +65,7 @@ function isNativeShell(): boolean {
  */
 export function detectPlatform(): PlatformInfo {
   const ua = navigator.userAgent;
-  const native = isNativeShell();
+  const native = isAnyNativeShell();
   const electron = /Electron\//.test(ua);
   const override = readOverride();
   if (override) return { platform: override, isNativeShell: native, isElectron: electron, overridden: true };

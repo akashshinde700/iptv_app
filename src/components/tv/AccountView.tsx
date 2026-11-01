@@ -375,6 +375,7 @@ function ProfilePanel({ customer, hasAccess, reason }: { customer: CustomerInfo;
   const queryClient = useQueryClient();
   const navigate = useAppStore((s) => s.navigate);
   const isTv = useIsTv();
+  const [playlistOpen, setPlaylistOpen] = useState(false);
 
   const logout = useMutation({
     mutationFn: async () => {

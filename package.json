@@ -20,7 +20,10 @@
     "cap:sync": "cap sync android",
     "cap:open": "cap open android",
     "db:dev:schema": "bun scripts/make-dev-schema.ts",
-    "dev:fixtures": "MEDIA_FIXTURES=1 next dev -p 3000"
+    "dev:fixtures": "MEDIA_FIXTURES=1 next dev -p 3000",
+    "ios:doctor": "bash scripts/ios.sh doctor",
+    "ios:run": "bash scripts/ios.sh run",
+    "ios:ipa": "bash scripts/ios.sh ipa"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.1",

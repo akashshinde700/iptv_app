@@ -1,13 +1,19 @@
 # StreamKaro — platform UX, navigation & Back behaviour
 
-One shared app (same components, API layer, business logic and theme tokens) with four
+One shared app (same components, API layer, business logic and theme tokens) with five
 interaction models. The platform is decided once at start-up in `src/lib/platform.ts`
 and stored in `useAppStore` (`platform`, `isNativeShell`, `isElectron`).
+
+Native shells are detected two ways: Capacitor (`Capacitor.isNativePlatform()` — Android /
+Android TV) and the injected `window.StreamKaroNative` object (the iOS app in `ios/`, built
+with xtool). Both set `isNativeShell: true`, so the web UI drops install nags, skips the
+service worker and uses the in-app "Exit StreamKaro?" prompt at the root.
 
 | Platform | Detected by | Layout | Input |
 |---|---|---|---|
 | **Android TV** | Android shell + `AppUpdater.getInfo().isTv` (no touch screen as the first guess); smart-TV browsers by user agent; **TV Mode** toggle on the web | `TvHeader` (Home · Live TV · Search · Favorites │ Plan · Profile · Settings), 10-foot type scale (`html.tv-mode`), no footer / ads / bottom tabs | D-pad, OK, Back, Play/Pause, channel keys |
 | **Android mobile** | Android shell with a touch screen; phones in a browser | `MobileHeader` + `BottomNav` (Home · Channels · Search · Favorites · Profile), filter bottom sheet, category chips | Touch, back gesture |
+| **iPhone / iPad (app)** | `window.StreamKaroNative.platform === "ios"` (native SwiftUI shell) | `MobileHeader` + `BottomNav`; portrait browsing, landscape video, left-edge swipe = Back, Picture-in-Picture + AirPlay | Touch |
 | **Windows** | Electron user agent | `SideNav` sidebar + content, no footer | Mouse + keyboard (arrow-key focus navigation, `/`, Esc, Space/K, F11, mouse Back) |
 | **Web** | everything else | Sidebar from `md` (icon rail) / `lg` (full), header + bottom tabs below `md`, footer | Mouse, keyboard, touch |
 
