@@ -3,7 +3,7 @@
  * (served at /downloads/…). Update the version + filenames here when a new
  * build is uploaded.
  */
-export const APP_VERSION = "0.4.1";
+export const APP_VERSION = "0.5.0";
 
 /**
  * Android APK release. Bump together with android/app/build.gradle
