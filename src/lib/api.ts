@@ -170,3 +170,18 @@ export async function fetchMovieById(id: string): Promise<MovieDetail> {
   if (!res.ok) throw new ApiError(res.status, (data as { error?: string }).error ?? "Failed to load movie", data);
   return (data as { movie: MovieDetail }).movie;
 }
+
+/** Personal M3U playlist link for the signed-in customer (Settings → "Watch in another app"). */
+export async function fetchMyPlaylist(): Promise<{
+  path: string;
+  url: string;
+  apps: string[];
+  note: string;
+}> {
+  const res = await fetch("/api/my/playlist", { cache: "no-store" });
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    throw new ApiError(res.status, (data as { error?: string } | null)?.error ?? "Playlist unavailable", data);
+  }
+  return res.json();
+}

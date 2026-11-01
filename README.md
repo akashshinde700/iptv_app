@@ -12,6 +12,9 @@ Dark-themed, mobile-first, PWA-installable, and built to ship to the web, **Andr
 - 🔎 **Search** by channel name + **filters** for country, category and language
 - 🎬 **HLS player** (hls.js) with **alternate sources** — if one stream is down, hop to the next quality/source
 - 🛡️ **Server-side stream proxy** (`/api/proxy`) for CORS/referer/user-agent–sensitive streams
+- 🩺 **Self-healing catalog** — a server-side *health doctor* probes every source (M3U / Xtream / Stalker), auto-removes dead streams, and **auto-hides channels that have no working source left**, restoring them the moment a provider recovers
+- 🔁 **Automatic server switching** — sources are ranked by real health and the player fails over on its own, including a watchdog for streams that load and then silently freeze: no more "change server" button
+- 🔗 **One-link playlists** — every customer gets a private M3U URL (with QR) for VLC / TiviMate / Kodi on phone, laptop or TV; dead channels are already filtered out
 - 🎬 **Movies & TV Shows hub** — one page for both: hero carousel, genre rails, search, **season + episode browser** with a **lazy per-series episode cache** (Xtream `get_series_info`, refreshed daily)
 - 🔌 **Pluggable media providers** — your own Xtream catalog by default; an optional third-party adapter behind `NXSHA_ENABLED`; a `MEDIA_FIXTURES=1` sample catalog for UI work with no database
 - 💬 **Subtitles + quality picker** in the player, and **resume playback** ("Resume 12:34" / "Start over", remembered per title *and* per episode)
@@ -38,7 +41,8 @@ Dark-themed, mobile-first, PWA-installable, and built to ship to the web, **Andr
 | Data pipeline | TypeScript seed script joining iptv-org `channels/streams/feeds/logos` datasets |
 | On-demand + guide | Xtream Movies/Series sync, XMLTV EPG parser, provider-agnostic media API |
 
-> 📚 **New:** the Movies & TV hub, series pipeline, subtitles, resume and EPG are documented in [`docs/MEDIA_HUB.md`](docs/MEDIA_HUB.md).
+> 📚 **Docs:** [`docs/MEDIA_HUB.md`](docs/MEDIA_HUB.md) covers the Movies & TV hub, series pipeline, subtitles, resume and EPG.
+> [`docs/AUTO_HEALING.md`](docs/AUTO_HEALING.md) covers the health doctor, automatic server switching, customer playlists and the simplified admin.
 
 ## 🚀 Quickstart
 

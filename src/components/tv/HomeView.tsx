@@ -2,7 +2,23 @@
 
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { CalendarClock, Crown, Download, Globe2, Languages, LogIn, Play, Radio, Search, Smartphone, Sparkles, Tv } from "lucide-react";
+import {
+  CalendarClock,
+  Crown,
+  Download,
+  Globe2,
+  Languages,
+  LogIn,
+  MonitorSmartphone,
+  Play,
+  Radio,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  Smartphone,
+  Sparkles,
+  Tv,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AdSlot } from "@/components/tv/AdSlot";
@@ -431,6 +447,22 @@ function Hero({
                 </Button>
               </>
             )}
+          </div>
+
+          <div className="mt-5 flex flex-wrap gap-2">
+            {[
+              { icon: ShieldCheck, label: "Dead channels removed automatically" },
+              { icon: RefreshCw, label: "Server switches by itself" },
+              { icon: MonitorSmartphone, label: "Watch on TV, laptop & phone" },
+            ].map(({ icon: Icon, label }) => (
+              <span
+                key={label}
+                className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/25 bg-emerald-500/[0.08] px-2.5 py-1 text-[11px] font-medium text-emerald-300/90"
+              >
+                <Icon className="h-3.5 w-3.5" aria-hidden />
+                {label}
+              </span>
+            ))}
           </div>
 
           <dl className="mt-7 flex flex-wrap gap-x-7 gap-y-3">

@@ -4,7 +4,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { reportStream } from "@/lib/stream-health";
-import { ChevronLeft, ExternalLink, Heart, ListVideo, Lock, Radio, Rss, SkipBack, SkipForward } from "lucide-react";
+import {
+  ChevronLeft,
+  ExternalLink,
+  Heart,
+  ListVideo,
+  Lock,
+  Radio,
+  RefreshCw,
+  Rss,
+  SkipBack,
+  SkipForward,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -29,6 +40,9 @@ export function WatchView({ channelId }: { channelId: string }) {
   const isApp = useAppStore((s) => s.isNativeShell);
   const isTv = useIsTv();
   const [sourceIndex, setSourceIndex] = useState(0);
+  // The server list is an escape hatch, not a task: auto-failover picks the server, so it
+  // stays collapsed unless the viewer wants to pin one.
+  const [serversOpen, setServersOpen] = useState(false);
   // Switching channels: start fresh from the best source (derived-state reset during render).
   const [prevChannel, setPrevChannel] = useState(channelId);
   if (prevChannel !== channelId) {
@@ -57,11 +71,30 @@ export function WatchView({ channelId }: { channelId: string }) {
     retry: (failureCount, err) => (err instanceof ApiError && err.status === 403 ? false : failureCount < 1),
   });
 
+  // 404 with no alternative = every provider's copy of this channel is dead right now. The
+  // server has already queued a recheck, so we simply look again in a few seconds instead of
+  // making the viewer understand "server" / "source" jargon or hunt for another button.
+  const isUnavailable =
+    error instanceof ApiError && error.status === 404 && error.data?.reason === "disabled";
   const locked = error instanceof ApiError && error.status === 403;
   const lockedReason = error instanceof ApiError ? error.message : "";
   const isGuestLock = error instanceof ApiError && error.data?.reason === "guest";
 
   const channel = data;
+
+  useEffect(() => {
+    if (!isUnavailable) return;
+    let attempts = 0;
+    const timer = window.setInterval(() => {
+      attempts += 1;
+      if (attempts > 3) {
+        window.clearInterval(timer);
+        return;
+      }
+      void refetch();
+    }, 10_000);
+    return () => window.clearInterval(timer);
+  }, [isUnavailable, refetch]);
 
   // remember in recents
   useEffect(() => {
@@ -100,7 +133,7 @@ export function WatchView({ channelId }: { channelId: string }) {
   const handleNextSource = () => {
     if (!channel) return;
     if (sourceIndex < channel.streams.length - 1) {
-      toast.info("Switching to the next source…");
+      toast.info("Switching to another server…");
       setSourceIndex((i) => Math.min(i + 1, channel.streams.length - 1));
     }
   };
@@ -117,7 +150,7 @@ export function WatchView({ channelId }: { channelId: string }) {
       tried.add(streamId);
       const nextIdx = channel.streams.findIndex((s) => !tried.has(s.id));
       if (nextIdx >= 0) {
-        toast.info("Switching to backup source…");
+        toast.info("Another server lagging — switching…");
         setSourceIndex(nextIdx);
       }
       // If every source has been tried, the player keeps its own error overlay
@@ -202,8 +235,19 @@ export function WatchView({ channelId }: { channelId: string }) {
       );
     }
     return (
-      <StateView icon={Radio} title="Channel not found" message="It may have been removed from the channel list.">
-        <Button className="rounded-full" data-autofocus onClick={() => navigate({ name: "browse" })}>
+      <StateView
+        icon={Radio}
+        title={isUnavailable ? "Fixing this channel…" : "Channel not found"}
+        message={
+          isUnavailable
+            ? "Every known server for this channel just failed. We're checking the other providers and will retry by itself."
+            : "It may have been removed from the channel list."
+        }
+      >
+        <Button className="rounded-full" data-autofocus onClick={() => refetch()}>
+          <RefreshCw className="mr-1.5 h-4 w-4" /> Try now
+        </Button>
+        <Button variant="ghost" className="rounded-full" onClick={() => navigate({ name: "browse" })}>
           Browse channels
         </Button>
       </StateView>
@@ -317,34 +361,48 @@ export function WatchView({ channelId }: { channelId: string }) {
             </div>
           </div>
 
-          {/* Alternate sources */}
+          {/* Servers — collapsed by default: StreamKaro picks and switches automatically. */}
           {channel.streams.length > 1 && (
-            <section className="mt-6" aria-label="Alternate stream sources">
-              <h2 className="mb-2 flex items-center gap-1.5 text-sm font-bold text-foreground">
-                <ListVideo className="h-4 w-4 text-primary" />
-                Alternate sources ({channel.streams.length})
-              </h2>
-              <div className="thin-scrollbar flex max-h-44 flex-wrap gap-2 overflow-y-auto rounded-xl border border-border/50 bg-card/40 p-3">
-                {channel.streams.map((stream, idx) => (
-                  <button
-                    key={stream.id}
-                    onClick={() => setSourceIndex(idx)}
-                    aria-current={idx === sourceIndex}
-                    data-selected={idx === sourceIndex || undefined}
-                    className={cn(
-                      "rounded-full border px-3 py-1.5 text-xs font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
-                      idx === sourceIndex
-                        ? "border-primary bg-primary text-primary-foreground"
-                        : "border-border/60 bg-muted/40 text-muted-foreground hover:border-primary/40 hover:text-foreground"
-                    )}
-                  >
-                    Source {idx + 1}
-                    {stream.quality ? ` · ${stream.quality}` : ""}
-                    {stream.title ? ` · ${stream.title}` : ""}
-                  </button>
-                ))}
+            <section className="mt-5" aria-label="Stream servers">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-300">
+                  <ListVideo className="h-3.5 w-3.5" />
+                  Auto server switching on
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {channel.streams.length} servers · picks a working one for you
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setServersOpen((open) => !open)}
+                  aria-expanded={serversOpen}
+                  className="ml-auto rounded-full border border-border/60 px-3 py-1 text-xs font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  {serversOpen ? "Hide servers" : "Choose a server"}
+                </button>
               </div>
-              <p className="mt-2 text-xs text-muted-foreground">If one source doesn&apos;t play, try another.</p>
+
+              {serversOpen && (
+                <div className="thin-scrollbar mt-2 flex max-h-44 flex-wrap gap-2 overflow-y-auto rounded-xl border border-border/50 bg-card/40 p-3">
+                  {channel.streams.map((stream, idx) => (
+                    <button
+                      key={stream.id}
+                      onClick={() => setSourceIndex(idx)}
+                      aria-current={idx === sourceIndex}
+                      data-selected={idx === sourceIndex || undefined}
+                      className={cn(
+                        "rounded-full border px-3 py-1.5 text-xs font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+                        idx === sourceIndex
+                          ? "border-primary bg-primary text-primary-foreground"
+                          : "border-border/60 bg-muted/40 text-muted-foreground hover:border-primary/40 hover:text-foreground"
+                      )}
+                    >
+                      {idx === 0 ? "Best" : `Server ${idx + 1}`}
+                      {stream.quality ? ` · ${stream.quality}` : ""}
+                    </button>
+                  ))}
+                </div>
+              )}
             </section>
           )}
 

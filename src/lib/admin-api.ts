@@ -467,3 +467,59 @@ export function addSource(channelId: string, body: { url: string; title?: string
     body: JSON.stringify(body),
   })
 }
+
+/* --------------------------------- health --------------------------------- */
+
+export interface HealthSnapshot {
+  channels: { total: number; ok: number; degraded: number; dead: number; hidden: number; unknown: number }
+  streams: { total: number; active: number; disabled: number; unchecked: number; checkedLastHour: number }
+  lastCheckedAt: string | null
+  fullyChecked: boolean
+}
+
+export interface HealthSweepSummary {
+  probed: number
+  ok: number
+  failed: number
+  disabled: number
+  recovered: number
+  channelsChecked: number
+  channelsHidden: number
+  channelsRestored: number
+  remaining: number
+  durationMs: number
+}
+
+export interface HealthSweepResult {
+  ok: boolean
+  summary: HealthSweepSummary
+}
+
+export function fetchHealth() {
+  return request<HealthSnapshot>("/api/admin/health")
+}
+
+/** Probe the next batch of streams, auto-disable dead ones, hide dead channels. */
+export function runHealthSweep(body: { batch?: number; budgetMs?: number } = {}) {
+  return request<HealthSweepResult>("/api/admin/health/sweep", {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export interface HiddenChannel {
+  id: string
+  name: string
+  logo: string | null
+  healthStatus: string
+  autoHiddenAt: string | null
+}
+
+/** Auto-hidden channels, so the operator can restore one by hand if the doctor hid it wrongly. */
+export function fetchHiddenChannels() {
+  return request<{ items: HiddenChannel[] }>("/api/admin/health/hidden")
+}
+
+export function restoreChannel(id: string) {
+  return request<{ ok: boolean }>(`/api/admin/health/hidden/${id}`, { method: "POST" })
+}

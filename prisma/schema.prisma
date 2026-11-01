@@ -69,6 +69,14 @@ model Channel {
   isNsfw      Boolean            @default(false)
   isActive    Boolean            @default(true)
   isDemo      Boolean            @default(false) // demo channels: playable even without a plan (home showcase)
+  // ── Health (maintained by the health doctor, src/lib/server/health-doctor.ts) ──
+  // UNKNOWN (never probed) | OK (every source works) | DEGRADED (some sources dead)
+  // | DEAD (no working source left)
+  healthStatus String    @default("UNKNOWN")
+  lastHealthAt DateTime?
+  // Set when the doctor hid this channel because every source was dead. Cleared (and
+  // isActive restored) the moment a source works again — operators never lose the row.
+  autoHiddenAt DateTime?
   portalId    String? // set when the channel was synced from a custom portal
   portal      Portal?            @relation(fields: [portalId], references: [id], onDelete: Cascade)
   streams     Stream[]
@@ -82,6 +90,7 @@ model Channel {
   @@index([isNsfw])
   @@index([isActive])
   @@index([isDemo])
+  @@index([healthStatus])
   @@index([name])
   @@index([portalId])
   @@index([organizationId, identityKey])
@@ -171,6 +180,10 @@ model Stream {
   portalId  String?
   portal    Portal? @relation(fields: [portalId], references: [id], onDelete: Cascade)
   priority     Int       @default(100)
+  // Health probe bookkeeping (the "doctor" sweep). `lastProbeAt` orders probing
+  // (never-probed and oldest first) and drives "checked 2 min ago" in the UI.
+  lastProbeAt   DateTime?
+  latencyMs     Int?
   status       String    @default("ACTIVE")
   failureCount Int       @default(0)
   lastFailureAt DateTime?
@@ -180,6 +193,7 @@ model Stream {
   @@index([channelId])
   @@index([portalId])
   @@index([status])
+  @@index([lastProbeAt])
 }
 
 // ─────────────────────────────── Custom portals ──────────────────────────────

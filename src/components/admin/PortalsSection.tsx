@@ -47,6 +47,7 @@ import {
   deleteAdminPortal,
   fetchPortalLogs,
   fetchAdminPortals,
+  runHealthSweep,
   syncAdminPortal,
   updateAdminPortal,
   uploadM3UFile,
@@ -73,51 +74,92 @@ function AddPortalDialog({ open, onClose }: { open: boolean; onClose: () => void
     setXtServer(""); setXtUser(""); setXtPass(""); setStPanel(""); setStMac("");
   };
 
-  const createPortal = useMutation({
-    mutationFn: async (body: Record<string, unknown>) => createAdminPortal(body),
-    onSuccess: () => {
+  /**
+   * Add → import → clean, in one click.
+   *
+   * Asking an operator to "now press Sync" (and then "now press scan") is exactly the kind of
+   * multi-step setup that made this panel feel complicated. The source is created, its
+   * channels are imported immediately, and a health pass removes anything dead before the
+   * customer ever sees it. Failures stay visible instead of silently disappearing.
+   */
+  const addSource = async (body: Record<string, unknown>) => {
+    const toastId = toast.loading("Adding source…");
+    try {
+      const portal = await createAdminPortal(body);
+      toast.loading("Source added — importing channels…", { id: toastId });
+      const result = await syncAdminPortal(portal.id);
+      toast.loading("Checking which channels actually work…", { id: toastId });
+      let removed = 0;
+      try {
+        const sweep = await runHealthSweep({ batch: 60 });
+        removed = sweep.summary.channelsHidden;
+      } catch {
+        /* the scheduled sweep will handle it */
+      }
+      toast.success(
+        `Ready — ${result.total.toLocaleString("en-IN")} channels imported` +
+          (removed > 0 ? `, ${removed} dead removed` : "") +
+          ". Everything else is live.",
+        { id: toastId, duration: 6000 },
+      );
       queryClient.invalidateQueries({ queryKey: ["admin-portals"] });
       queryClient.invalidateQueries({ queryKey: ["admin-stats"] });
-      toast.success("Portal add ho gaya — ab 'Sync Now' dabao");
+      queryClient.invalidateQueries({ queryKey: ["admin-health"] });
       reset();
       onClose();
-    },
-    onError: (error: Error) => toast.error(error.message),
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not add this source", { id: toastId });
+    }
+  };
+
+  const createPortal = useMutation({
+    mutationFn: (body: Record<string, unknown>) => addSource(body),
   });
 
   const uploadFile = useMutation({
     mutationFn: async () => {
-      if (!file) throw new Error("File select karo");
-      return uploadM3UFile(file, fileName || file.name);
+      if (!file) throw new Error("Choose a file first");
+      const toastId = toast.loading("Uploading playlist…");
+      try {
+        const portal = await uploadM3UFile(file, fileName || file.name);
+        toast.loading("Importing channels…", { id: toastId });
+        const result = await syncAdminPortal(portal.id);
+        toast.success(`Ready — ${result.total.toLocaleString("en-IN")} channels imported.`, { id: toastId });
+        reset();
+        onClose();
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Upload failed", { id: toastId });
+        throw error;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-portals"] });
       queryClient.invalidateQueries({ queryKey: ["admin-stats"] });
-      toast.success("File upload ho gayi — ab 'Sync Now' dabao");
-      reset();
-      onClose();
     },
-    onError: (error: Error) => toast.error(error.message),
   });
 
   return (
     <DialogContent className="max-h-[90vh] overflow-y-auto bg-zinc-950 sm:max-w-xl">
       <DialogHeader>
-        <DialogTitle>Naya Source Add Karo</DialogTitle>
+        <DialogTitle>Add a source</DialogTitle>
         <DialogDescription>
-          Stalker panel (MAC), Xtream (user/pass), M3U link ya M3U file — jo bhi hai, yahan daalo.
+          Paste a playlist link, an Xtream login, or a Stalker MAC. Channels import straight away and dead ones are
+          filtered out automatically — no extra steps.
         </DialogDescription>
       </DialogHeader>
 
-      <Tabs defaultValue="stalker" className="mt-2">
+      <Tabs defaultValue="m3u" className="mt-2">
         <TabsList className="grid w-full grid-cols-4 bg-zinc-900">
-          <TabsTrigger value="stalker">📡 Stalker</TabsTrigger>
-          <TabsTrigger value="xtream">🔗 Xtream</TabsTrigger>
-          <TabsTrigger value="m3u">🔗 M3U Link</TabsTrigger>
-          <TabsTrigger value="file">📁 File</TabsTrigger>
+          <TabsTrigger value="m3u">Playlist</TabsTrigger>
+          <TabsTrigger value="xtream">Xtream</TabsTrigger>
+          <TabsTrigger value="stalker">Stalker</TabsTrigger>
+          <TabsTrigger value="file">File</TabsTrigger>
         </TabsList>
 
         <TabsContent value="stalker" className="space-y-3 pt-3">
+          <p className="text-xs text-zinc-500">
+            A Stalker portal needs the portal link and the MAC address of the device it was issued for.
+          </p>
           <div className="grid gap-2">
             <Label>Panel URL</Label>
             <Input value={stPanel} onChange={(e) => setStPanel(e.target.value)} placeholder="http://xpone.nl/c/" />
@@ -133,11 +175,15 @@ function AddPortalDialog({ open, onClose }: { open: boolean; onClose: () => void
               createPortal.mutate({ name: stPanel.replace(/^https?:\/\//, "").slice(0, 40) || "Stalker Portal", type: "STALKER", url: stPanel, macAddress: stMac })
             }
           >
-            {createPortal.isPending ? "Adding…" : "Add Stalker Portal"}
+            {createPortal.isPending ? "Adding…" : "Add Stalker portal"}
           </Button>
         </TabsContent>
 
         <TabsContent value="xtream" className="space-y-3 pt-3">
+          <p className="text-xs text-zinc-500">
+            The server address and the username/password your provider gave you. Channels, movies and TV shows are all
+            imported from it.
+          </p>
           <div className="grid gap-2">
             <Label>Server URL</Label>
             <Input value={xtServer} onChange={(e) => setXtServer(e.target.value)} placeholder="http://skyfilex.fun:80" />
@@ -159,11 +205,14 @@ function AddPortalDialog({ open, onClose }: { open: boolean; onClose: () => void
               createPortal.mutate({ name: xtServer.replace(/^https?:\/\//, "").slice(0, 40) || "Xtream", type: "XTREAM", url: xtServer, username: xtUser, password: xtPass })
             }
           >
-            {createPortal.isPending ? "Adding…" : "Add Xtream Source"}
+            {createPortal.isPending ? "Adding…" : "Add Xtream source"}
           </Button>
         </TabsContent>
 
         <TabsContent value="m3u" className="space-y-3 pt-3">
+          <p className="text-xs text-zinc-500">
+            A playlist link (ends in .m3u / .m3u8, or a get.php link). This is the most common option.
+          </p>
           <div className="grid gap-2">
             <Label>M3U Playlist Link</Label>
             <Input
@@ -183,7 +232,7 @@ function AddPortalDialog({ open, onClose }: { open: boolean; onClose: () => void
               createPortal.mutate({ name: m3uName || m3uUrl.replace(/^https?:\/\//, "").slice(0, 40) || "M3U Link", type: "M3U_URL", url: m3uUrl })
             }
           >
-            {createPortal.isPending ? "Adding…" : "Add M3U Link"}
+            {createPortal.isPending ? "Adding…" : "Add playlist & import"}
           </Button>
         </TabsContent>
 
@@ -207,7 +256,7 @@ function AddPortalDialog({ open, onClose }: { open: boolean; onClose: () => void
             onClick={() => uploadFile.mutate()}
           >
             <FileUp className="mr-1 h-4 w-4" />
-            {uploadFile.isPending ? "Uploading…" : "Upload File"}
+            {uploadFile.isPending ? "Uploading…" : "Upload & import"}
           </Button>
         </TabsContent>
       </Tabs>

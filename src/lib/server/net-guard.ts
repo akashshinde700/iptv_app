@@ -40,6 +40,19 @@ function isPrivateHost(hostname: string): boolean {
   return false
 }
 
+/** Non-throwing variant, for the health doctor's probes. */
+export function isPublicHttpUrl(raw: string | null | undefined): boolean {
+  const value = raw?.trim()
+  if (!value) return false
+  try {
+    const url = new URL(value)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false
+    return !isPrivateHost(url.hostname)
+  } catch {
+    return false
+  }
+}
+
 /** Throw HttpError(400) unless `raw` is an http(s) URL to a public host. */
 export function assertPublicSourceUrl(raw: string | null | undefined, label = 'URL'): void {
   const value = raw?.trim()
