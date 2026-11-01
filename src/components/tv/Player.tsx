@@ -63,6 +63,8 @@ const FIT_MODES = [
 ] as const;
 
 const CONTROLS_HIDE_MS = 3500;
+/** No playback progress for this long ⇒ treat the source as dead and fail over. */
+const STALL_WATCHDOG_MS = 22_000;
 const MAX_RECONNECTS = 3;
 const OFFLINE_MESSAGE = "You're offline — the channel will start again when the connection is back.";
 
@@ -325,6 +327,12 @@ function PlayerCore({
   const [activeSubtitle, setActiveSubtitle] = useState("off");
   const resumedRef = useRef(false);
   const progressRef = useRef(0);
+  // Watchdog: a source can "load" and then silently freeze (black screen, stalled segment,
+  // dead panel). Nothing throws, so the HLS error path never fires — the viewer used to sit
+  // there and switch servers by hand. This closes that gap.
+  const lastProgressRef = useRef(Date.now());
+  const watchdogFiredRef = useRef(false);
+  const watchdogHandlers = useRef({ onSourceError, stream });
   const mutedRef = useRef(muted);
   // Report each source's health at most once per mount (the core remounts per source),
   // so a healthy stream isn't spammed by repeated onPlaying and a dead one reports once.
@@ -395,6 +403,36 @@ function PlayerCore({
       if (!controlsRef.current?.contains(document.activeElement)) setControlsVisible(false);
     }, CONTROLS_HIDE_MS);
     return () => window.clearTimeout(hideTimer.current);
+  }, []);
+
+  useEffect(() => {
+    watchdogHandlers.current = { onSourceError, stream };
+  }, [onSourceError, stream]);
+
+  // Auto-failover watchdog (see STALL_WATCHDOG_MS). A paused video is a viewer choice, not a
+  // failure — the timer is simply re-armed while paused.
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (watchdogFiredRef.current) return;
+      const video = videoRef.current;
+      if (!video) return;
+      if (video.paused) {
+        lastProgressRef.current = Date.now();
+        return;
+      }
+      if (Date.now() - lastProgressRef.current < STALL_WATCHDOG_MS) return;
+      watchdogFiredRef.current = true;
+      const { onSourceError: failover, stream: current } = watchdogHandlers.current;
+      if (!navigator.onLine) {
+        setStatus("error");
+        setErrorMessage(OFFLINE_MESSAGE);
+        return;
+      }
+      setStatus("error");
+      setErrorMessage("This server stopped responding — switching to another one.");
+      if (current?.id) failover?.(current.id, "stalled");
+    }, 3000);
+    return () => window.clearInterval(timer);
   }, []);
 
   // back online after a failure: try the channel again automatically
@@ -740,12 +778,14 @@ function PlayerCore({
         onPlaying={() => {
           reconnectAttempts.current = 0;
           setReconnectAttempt(0);
+          lastProgressRef.current = Date.now();
           setStatus("playing");
           reportOk();
         }}
         onPause={() => setStatus((s) => (s === "error" ? s : "paused"))}
         onLoadedMetadata={() => {
           const video = videoRef.current;
+          lastProgressRef.current = Date.now();
           setDuration(video?.duration ?? 0);
           // Resume exactly once per source, and only when the viewer actually has a
           // position to resume from (never fight a manual seek).
@@ -766,6 +806,7 @@ function PlayerCore({
         onTimeUpdate={() => {
           const video = videoRef.current;
           if (!video) return;
+          lastProgressRef.current = Date.now();
           setCurrentTime(video.currentTime);
           // throttled heartbeat: persist a resume point every ~5s of playback
           if (onProgress && video.currentTime - progressRef.current >= 5) {
@@ -892,7 +933,7 @@ function PlayerCore({
         <div
           ref={controlsRef}
           className={cn(
-            "absolute inset-x-0 bottom-0 flex items-center gap-1.5 bg-gradient-to-t from-black/85 to-transparent px-3 pb-2.5 pt-10 transition-opacity duration-200",
+            "absolute inset-x-0 bottom-0 flex flex-wrap items-center gap-1.5 bg-gradient-to-t from-black/85 to-transparent px-3 pb-2.5 pt-10 transition-opacity duration-200",
             showControls ? "opacity-100" : "opacity-0"
           )}
         >
@@ -969,8 +1010,8 @@ function PlayerCore({
             <Select value={activeSubtitle} onValueChange={(val) => setActiveSubtitle(val)}>
               <SelectTrigger
                 className={cn(
-                  "w-[6.5rem] rounded-full border-white/20 bg-black/50 text-xs text-white [&>svg]:text-white",
-                  isTv ? "h-11" : "h-9",
+                  "rounded-full border-white/20 bg-black/50 text-xs text-white [&>svg]:text-white",
+                  isTv ? "h-11 w-[6.5rem]" : "h-9 w-[5.25rem] sm:w-[6.5rem]",
                 )}
                 aria-label="Subtitles"
               >
@@ -1000,7 +1041,10 @@ function PlayerCore({
               }}
             >
               <SelectTrigger
-                className="h-9 w-[5.75rem] rounded-full border-white/20 bg-black/50 text-xs text-white [&>svg]:text-white"
+                className={cn(
+                  "rounded-full border-white/20 bg-black/50 text-xs text-white [&>svg]:text-white",
+                  isTv ? "h-11 w-[6.5rem]" : "h-9 w-[4.75rem] sm:w-[5.75rem]",
+                )}
                 aria-label="Quality"
               >
                 <SelectValue placeholder="Auto" />
@@ -1019,7 +1063,10 @@ function PlayerCore({
           <Button
             variant="ghost"
             size="sm"
-            className={cn("rounded-full px-2.5 text-xs text-white hover:bg-white/15 hover:text-white", isTv ? "h-11" : "h-9")}
+            className={cn(
+              "hidden rounded-full px-2.5 text-xs text-white hover:bg-white/15 hover:text-white sm:inline-flex",
+              isTv ? "h-11" : "h-9",
+            )}
             onClick={() => setFitIndex((i) => (i + 1) % FIT_MODES.length)}
             aria-label={`Zoom: ${FIT_MODES[fitIndex].label}`}
           >

@@ -11,7 +11,7 @@
  */
 import type { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
-import { splitPipe, portalValidityClause } from '@/lib/server/iptv'
+import { splitPipe, portalValidityClause, servableChannelClause } from '@/lib/server/iptv'
 
 export interface AccessState {
   hasAccess: boolean
@@ -158,6 +158,11 @@ export async function buildCustomerChannelWhere(customerId: string): Promise<{
   // Tenant scope — a customer can only ever see their own organization's channels.
   if (state.organizationId) and.push({ organizationId: state.organizationId })
 
+  // Health guard: a channel whose every source is (auto-)disabled is simply not in the
+  // catalog. The health doctor re-enables it the moment a source works again, so this is
+  // "hide dead channels", never "delete them".
+  and.push(servableChannelClause())
+
   // Validity guard: channels of expired / dead / inactive sources are never served,
   // even if plan rules would otherwise match them.
   and.push(portalValidityClause())
@@ -180,6 +185,7 @@ export async function buildCustomerChannelWhere(customerId: string): Promise<{
       ...(state.organizationId ? [{ organizationId: state.organizationId }] : []),
       { isActive: true },
       portalValidityClause(),
+      servableChannelClause(),
     ],
   })
 

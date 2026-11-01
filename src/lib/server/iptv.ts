@@ -14,6 +14,10 @@ export const STREAM_SELECT = {
   status: true,
   priority: true,
   failureCount: true,
+  lastOkAt: true,
+  lastFailureAt: true,
+  lastProbeAt: true,
+  latencyMs: true,
 } satisfies Prisma.StreamSelect
 
 /** Consecutive playback failures before a stream is auto-disabled (health-aware failover). */
@@ -138,19 +142,40 @@ function isHlsUrl(url: string): boolean {
 interface StreamHealth {
   status?: string
   priority?: number
+  failureCount?: number
+  lastOkAt?: Date | null
+  lastFailureAt?: Date | null
 }
 
 /**
- * Canonical stream ordering — the player consumes this order and fails over top-to-bottom:
- *   1. healthy (ACTIVE) streams before disabled ones
- *   2. lower `priority` number first (admin-set primary → fallbacks)
- *   3. then HLS, higher parsed quality, streams that carry a quality label
+ * Canonical stream ordering — the player consumes this order and fails over top-to-bottom.
+ *
+ * This is the "no one should have to pick a server" rule, in priority order:
+ *   1. healthy (ACTIVE) before auto-disabled
+ *   2. a source that recently played beats one that has been failing (`failureCount`)
+ *   3. lower `priority` first (operator can still pin a favourite)
+ *   4. HLS, then higher parsed quality, then streams that carry a quality label
+ *
+ * Because the health doctor keeps `failureCount` / `lastOkAt` fresh, the first source a
+ * customer gets is almost always one that actually worked recently — across every portal
+ * (M3U / Xtream / Stalker) that carries the channel.
  */
 export function sortStreams<T extends { url: string; quality: string | null } & StreamHealth>(streams: T[]): T[] {
   return [...streams].sort((a, b) => {
     const aDead = a.status === 'DISABLED' ? 1 : 0
     const bDead = b.status === 'DISABLED' ? 1 : 0
     if (aDead !== bDead) return aDead - bDead
+
+    // Recent success is the strongest signal we have; a never-played source counts as 0.
+    const aOk = a.lastOkAt ? new Date(a.lastOkAt).getTime() : 0
+    const bOk = b.lastOkAt ? new Date(b.lastOkAt).getTime() : 0
+    const aRecent = aOk > Date.now() - 24 * 60 * 60 * 1000 ? 1 : 0
+    const bRecent = bOk > Date.now() - 24 * 60 * 60 * 1000 ? 1 : 0
+    if (aRecent !== bRecent) return bRecent - aRecent
+    const af = a.failureCount ?? 0
+    const bf = b.failureCount ?? 0
+    if (af !== bf) return af - bf
+
     const pa = a.priority ?? 100
     const pb = b.priority ?? 100
     if (pa !== pb) return pa - pb

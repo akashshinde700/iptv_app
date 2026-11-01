@@ -2,6 +2,7 @@ import { db } from '@/lib/db'
 import { clientIp, getCustomer, rateLimit, toErrorResponse } from '@/lib/server/auth'
 import { buildCustomerChannelWhere } from '@/lib/server/access'
 import { FAILURE_THRESHOLD } from '@/lib/server/iptv'
+import { refreshChannelHealth, scheduleChannelRecheck } from '@/lib/server/health-doctor'
 import { resolveActiveTenant } from '@/lib/server/tenant'
 
 export const dynamic = 'force-dynamic'
@@ -57,6 +58,8 @@ export async function POST(request: Request): Promise<Response> {
         where: { id: streamId },
         data: { failureCount: 0, lastOkAt: new Date(), status: 'ACTIVE', lastError: null },
       })
+      // A working source means the channel is healthy again → un-hide it if the doctor hid it.
+      void refreshChannelHealth([stream.channelId]).catch(() => {})
       return Response.json({ ok: true, status: 'ACTIVE' })
     }
 
@@ -67,10 +70,18 @@ export async function POST(request: Request): Promise<Response> {
       data: {
         failureCount: nextCount,
         lastFailureAt: new Date(),
+        lastProbeAt: new Date(),
         lastError: body.error?.slice(0, 300) ?? null,
         ...(disable ? { status: 'DISABLED' } : {}),
       },
     })
+
+    // Customer-visible failure: recheck this channel's other sources soon (debounced), so the
+    // next visit switches to a provider that works without anyone touching a "server" picker.
+    if (disable) {
+      scheduleChannelRecheck(stream.channelId)
+      void refreshChannelHealth([stream.channelId]).catch(() => {})
+    }
     return Response.json({ ok: true, failureCount: nextCount, disabled: disable })
   } catch (error) {
     return toErrorResponse(error)

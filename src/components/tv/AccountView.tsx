@@ -32,6 +32,7 @@ import { Label } from "@/components/ui/label";
 import { fmtDate } from "@/components/admin/shared";
 import { PlanCard, PlansSkeleton, usePlans } from "@/components/tv/Plans";
 import { StateView, describeError } from "@/components/tv/StateView";
+import { PlaylistDialog } from "@/components/tv/PlaylistDialog";
 import { useAppStore, useIsTv } from "@/lib/store";
 import { useMe, type CustomerInfo } from "@/lib/use-me";
 import { cn } from "@/lib/utils";
@@ -452,6 +453,9 @@ function ProfilePanel({ customer, hasAccess, reason }: { customer: CustomerInfo;
           <Button variant="outline" className="rounded-full" onClick={() => navigate({ name: "premium" })}>
             <Crown className="mr-1.5 h-4 w-4" /> Subscription
           </Button>
+          <Button variant="outline" className="rounded-full" onClick={() => setPlaylistOpen(true)}>
+            <MonitorSmartphone className="mr-1.5 h-4 w-4" /> Watch in another app
+          </Button>
           <Button variant="outline" className="rounded-full" onClick={() => navigate({ name: "settings" })}>
             <Settings className="mr-1.5 h-4 w-4" /> Settings
           </Button>
@@ -460,6 +464,7 @@ function ProfilePanel({ customer, hasAccess, reason }: { customer: CustomerInfo;
           </Button>
         </div>
       </section>
+      <PlaylistDialog open={playlistOpen} onOpenChange={setPlaylistOpen} />
     </div>
   );
 }

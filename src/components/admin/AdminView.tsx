@@ -17,8 +17,9 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronLeft,
-  FileClock,
   Layers,
+  FileClock,
+  HeartPulse,
   LayoutDashboard,
   Lock,
   LogOut,
@@ -44,22 +45,41 @@ import { SourcesSection } from "./SourcesSection";
 import { CustomersSection } from "./CustomersSection";
 import { PlansSection } from "./PlansSection";
 import { PortalsSection } from "./PortalsSection";
+import { HealthSection } from "./HealthSection";
 import { fmtDate } from "./shared";
 
-type Section = "dashboard" | "customers" | "plans" | "channels" | "sources" | "portals" | "audit" | "settings";
+type Section =
+  | "dashboard"
+  | "health"
+  | "failover"
+  | "sources"
+  | "channels"
+  | "customers"
+  | "plans"
+  | "audit"
+  | "settings";
 
 const BASE_DOMAIN = process.env.NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN || "streamkaro.app";
 
-const NAV: { key: Section; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+/**
+ * Ordered the way an operator actually works: my content sources → is it healthy → what do
+ * customers watch → who pays me. The old menu had two near-identical "sources" entries
+ * ("Failover Sources" and "Stalker Portals") which was the single most confusing thing here.
+ */
+const NAV: { key: Section; label: string; icon: React.ComponentType<{ className?: string }>; hint?: string }[] = [
   { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { key: "sources", label: "My sources", icon: Radio, hint: "M3U · Xtream · Stalker" },
+  { key: "health", label: "Auto-fix", icon: HeartPulse, hint: "dead channels" },
+  { key: "channels", label: "Channels", icon: Tv },
+  { key: "failover", label: "Channel sources", icon: Layers, hint: "per channel" },
   { key: "customers", label: "Customers", icon: Users },
   { key: "plans", label: "Plans", icon: Wallet },
-  { key: "channels", label: "Channels", icon: Tv },
-  { key: "sources", label: "Failover Sources", icon: Layers },
-  { key: "portals", label: "Stalker Portals", icon: Radio },
   { key: "audit", label: "Audit Logs", icon: FileClock },
   { key: "settings", label: "Settings", icon: Settings },
 ];
+
+/** Kept so an old "#admin#portals" deep link still lands somewhere sensible. */
+const LEGACY_SECTION: Record<string, Section> = { portals: "sources" };
 
 function AdminLogin() {
   const queryClient = useQueryClient();
@@ -258,7 +278,9 @@ export function AdminView() {
   const [section, setSection] = useState<Section>(() => {
     if (typeof window === "undefined") return "dashboard";
     const match = window.location.hash.match(/^#admin#?(\w+)?/);
-    const found = match?.[1] ? NAV.find((n) => n.key === match[1]) : undefined;
+    const raw = match?.[1] ?? "";
+    const key = (LEGACY_SECTION[raw] ?? raw) as Section;
+    const found = NAV.find((n) => n.key === key);
     return found?.key ?? "dashboard";
   });
 
@@ -326,8 +348,13 @@ export function AdminView() {
                     : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
                 }`}
               >
-                <Icon className="h-4 w-4" />
-                {item.label}
+                <Icon className="h-4 w-4 shrink-0" />
+                <span className="flex min-w-0 flex-col text-left leading-tight">
+                  <span>{item.label}</span>
+                  {"hint" in item && item.hint ? (
+                    <span className="hidden text-[10px] font-normal text-zinc-500 lg:block">{item.hint}</span>
+                  ) : null}
+                </span>
               </button>
             );
           })}
@@ -338,9 +365,10 @@ export function AdminView() {
           {section === "dashboard" && <AdminDashboard onNavigate={(s) => setSection(s as Section)} />}
           {section === "customers" && <CustomersSection />}
           {section === "plans" && <PlansSection />}
+          {section === "health" && <HealthSection onOpenChannels={() => setSection("failover")} />}
+          {section === "sources" && <PortalsSection />}
           {section === "channels" && <ChannelsSection />}
-          {section === "sources" && <SourcesSection />}
-          {section === "portals" && <PortalsSection />}
+          {section === "failover" && <SourcesSection />}
           {section === "audit" && <AuditSection />}
           {section === "settings" && <SettingsSection admin={admin} org={org} />}
         </div>

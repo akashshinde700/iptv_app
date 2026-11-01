@@ -9,6 +9,7 @@ import {
   Lock,
   MonitorPlay,
   MonitorSmartphone,
+  ListVideo,
   RefreshCw,
   UserRound,
   Volume2,
@@ -17,6 +18,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { InstallButton } from "@/components/tv/InstallButton";
+import { PlaylistDialog } from "@/components/tv/PlaylistDialog";
 import { CHECK_UPDATE_EVENT } from "@/components/tv/UpdatePrompt";
 import { APP_VERSION } from "@/lib/downloads";
 import {
@@ -76,6 +78,7 @@ export function SettingsView() {
   const setSupportOpen = useAppStore((s) => s.setSupportOpen);
   const isTv = useIsTv();
 
+  const [playlistOpen, setPlaylistOpen] = useState(false);
   const [soundOn, setSoundOn] = useState(() => !readMutedPreference());
   const [engine, setEngine] = useState(() => readPlayerEnginePreference());
   const [nativeInfo, setNativeInfo] = useState<NativeAppInfo | null>(null);
@@ -104,6 +107,7 @@ export function SettingsView() {
   return (
     <div className="mx-auto max-w-3xl space-y-5">
       <h1 className={cn("font-extrabold tracking-tight", isTv ? "text-4xl" : "text-2xl sm:text-3xl")}>Settings</h1>
+      <PlaylistDialog open={playlistOpen} onOpenChange={setPlaylistOpen} />
 
       <Section title="Display">
         {platform === "tv" ? (
@@ -174,6 +178,18 @@ export function SettingsView() {
         <Row icon={Crown} title="Subscription" description="Your plan, expiry and available plans.">
           <Button size="sm" variant="outline" className="rounded-full" onClick={() => navigate({ name: "premium" })}>
             Open
+          </Button>
+        </Row>
+      </Section>
+
+      <Section title="Watch anywhere">
+        <Row
+          icon={ListVideo}
+          title="Playlist for other apps"
+          description="One link for VLC, TiviMate, Kodi or any IPTV player — dead channels are skipped automatically."
+        >
+          <Button variant="outline" className="rounded-full" onClick={() => setPlaylistOpen(true)}>
+            Get link
           </Button>
         </Row>
       </Section>
