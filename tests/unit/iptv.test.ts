@@ -1,4 +1,8 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
+
+/* iptv.ts imports the Prisma client at module scope; the logic under test is pure. */
+vi.mock('@/lib/db', () => ({ db: {} }))
+
 import { splitPipe, qualityRank, sortStreams, pickBestStream, buildChannelWhere, parseListParams } from '@/lib/server/iptv'
 import { regionForCountry } from '@/lib/server/regions'
 

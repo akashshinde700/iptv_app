@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import {
   Crown,
   Download,
@@ -28,9 +28,12 @@ import {
   savePlayerEnginePreference,
   type NativeAppInfo,
 } from "@/lib/native";
+import { getIosShell } from "@/lib/ios-shell";
 import { readMutedPreference, saveMutedPreference } from "@/lib/player-prefs";
 import { useAppStore, useIsTv } from "@/lib/store";
 import { cn } from "@/lib/utils";
+
+const noopSubscribe = () => () => {};
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -82,6 +85,9 @@ export function SettingsView() {
   const [soundOn, setSoundOn] = useState(() => !readMutedPreference());
   const [engine, setEngine] = useState(() => readPlayerEnginePreference());
   const [nativeInfo, setNativeInfo] = useState<NativeAppInfo | null>(null);
+  // Non-null only inside the native iOS app (xtool shell). useSyncExternalStore
+  // keeps this out of an effect, so server render stays null and hydration matches.
+  const iosShell = useSyncExternalStore(noopSubscribe, getIosShell, () => null);
   const hasNativePlayer = hasNativePlugin("NativePlayer");
   const upiVpa = process.env.NEXT_PUBLIC_UPI_VPA;
 
@@ -182,6 +188,20 @@ export function SettingsView() {
         </Row>
       </Section>
 
+      {iosShell && (
+        <Section title="StreamKaro app">
+          <Row
+            icon={MonitorSmartphone}
+            title="App server"
+            description="The address this app loads. Change it if your StreamKaro website moves to a new domain."
+          >
+            <Button size="sm" variant="outline" className="rounded-full" onClick={() => iosShell.openSettings()}>
+              Change
+            </Button>
+          </Row>
+        </Section>
+      )}
+
       <Section title="Watch anywhere">
         <Row
           icon={ListVideo}
@@ -201,7 +221,7 @@ export function SettingsView() {
           </Button>
         </Row>
         {!isNativeShell && platform === "web" && (
-          <Row icon={Download} title="Get the apps" description="Android, Android TV and Windows.">
+          <Row icon={Download} title="Get the apps" description="iPhone, iPad, Android, Android TV and Windows.">
             <InstallButton />
             <Button size="sm" variant="outline" className="rounded-full" onClick={() => navigate({ name: "download" })}>
               Downloads
@@ -221,7 +241,13 @@ export function SettingsView() {
         <Row
           icon={Info}
           title="Version"
-          description={nativeInfo ? `App ${nativeInfo.versionName} (${nativeInfo.flavor === "tv" ? "Android TV" : "Android"})` : `Web ${APP_VERSION}`}
+          description={
+            nativeInfo
+              ? `App ${nativeInfo.versionName} (${nativeInfo.flavor === "tv" ? "Android TV" : "Android"})`
+              : iosShell
+                ? `iOS app ${APP_VERSION}`
+                : `Web ${APP_VERSION}`
+          }
         >
           {hasNativePlugin("AppUpdater") && (
             <Button size="sm" variant="outline" className="rounded-full" onClick={() => window.dispatchEvent(new Event(CHECK_UPDATE_EVENT))}>

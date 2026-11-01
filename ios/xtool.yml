@@ -1,0 +1,5 @@
+version: 1
+bundleID: com.streamkaro.app
+product: StreamKaro
+infoPath: Support/Info.plist
+iconPath: AppIcon.png

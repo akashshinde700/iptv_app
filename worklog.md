@@ -769,3 +769,50 @@ plan + 1 added sports channel → customer gets news + that one sports channel, 
 removing it revokes access; cross-tenant id dropped), billing-api 28/28 regression (access engine
 unbroken), plan-builder-ui 8/8 (multi-select chips, validity, live preview, channel picker, phone
 no overflow). NOT the multi-source failover system (that giant prompt is a separate future feature).
+
+---
+Task: Native iOS app (xtool) + iOS-aware web shell
+Agent: Arena agent
+
+Work Log:
+- Studied https://github.com/xtool-org/xtool (PackSchema/Planner/Packer/DevCommand) before writing a
+  line: an xtool project = SwiftPM package with ONE library product, an `xtool.yml`
+  (version/bundleID/product/infoPath/iconPath(+resources/entitlements/extensions)), and
+  `@main struct App: App`. Paths in xtool.yml are relative to the package dir; `infoPath` plist is
+  merged over xtool's defaults; `iconPath` must be .png and is copied to the bundle root as
+  CFBundleIconFile; `resources` are copied to the bundle root by lastPathComponent. Commands:
+  `xtool setup|auth|devs|dev build [--sign --ipa]|dev generate-xcode-project|devices|install|launch`.
+- New `ios/`: Package.swift (tools 5.9 → Swift 5 language mode, iOS 17), xtool.yml
+  (bundleID com.streamkaro.app, product StreamKaro), Support/Info.plist (StreamKaroBaseURL,
+  NSAllowsArbitraryLoadsInWebContent for http IPTV streams, portrait+landscape, UIBackgroundModes
+  audio, streamkaro:// URL scheme, ITSAppUsesNonExemptEncryption=false),
+  Support/StreamKaro.entitlements (associated domains, NOT wired by default — needs a paid team),
+  AppIcon.png.
+- Sources/StreamKaro: WebStore + WebContainer (WKWebView: inline playback, PiP,
+  isElementFullscreenEnabled, custom UA suffix "StreamKaro-iOS", KVO progress/canGoBack,
+  navigation policy — same-host in-app, external → SFSafariViewController, target=_blank → Safari,
+  tel/mailto → UIApplication, 5xx and connection errors → native error screen,
+  left-edge swipe → window.__skBack()), Bridge (documentStart script exposing
+  window.StreamKaroNative + auto keep-awake driven by <video> play/pause events), RootView
+  (splash / thin progress bar / offline retry), ServerSettingsView (repoint the app at another
+  domain per device via UserDefaults), StreamKaroApp (@main + AppDelegate: .playback audio
+  session for background audio, streamkaro:// and universal-link handling incl. cold-start
+  pendingURL).
+- scripts/ios.sh (doctor/run/build/ipa/version) + package.json ios:doctor|ios:run|ios:ipa;
+  docs/IOS_APP.md (toolchain, build, layout, JS bridge, universal links, icon/version,
+  sideloading/App Store reality incl. guideline 4.2 minimum-functionality caveat, troubleshooting).
+- Web integration: src/lib/ios-shell.ts (typed bridge, shareLink native→Web Share→clipboard,
+  haptic); platform.ts treats the iOS shell as a native shell (isNativeShell: true) so install
+  nags/service-worker/history-guard behave like the Android app; SettingsView "StreamKaro app →
+  App server" row (useSyncExternalStore, SSR-safe); ExitConfirmDialog explains swipe-up on iOS
+  instead of a dead "Exit" (App Store 2.5.1); PlaylistDialog gains a real Share button.
+- Universal links: /apple-app-site-association route (404 unless APPLE_TEAM_ID; excludes /api/*
+  and /downloads/*) + next.config.ts beforeFiles rewrite from /.well-known/... ; verified live on
+  the dev server (200 application/json, correct appIDs).
+- Also fixed a real pre-existing build breaker found by tsc: AccountView's PlaylistDialog used
+  playlistOpen/setPlaylistOpen that were never declared; and tests/unit/iptv.test.ts failed at
+  import (missing vi.mock('@/lib/db')).
+- Verified: vitest 121/121 across 11 files (12 new iOS/association tests); eslint clean on every
+  touched file; tsc clean except Prisma-stub errors (client not generated here); dev server 200 for
+  / and the association file. Swift itself cannot be compiled in this sandbox (no swift toolchain /
+  no Darwin SDK) — first `xtool dev` on the user's machine is the real compile check.

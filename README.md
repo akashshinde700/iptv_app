@@ -2,7 +2,7 @@
 
 > **10,000+ free live TV channels, zero cost, zero login** — a blazing-fast IPTV discovery + playback web app powered by the public [iptv-org](https://github.com/iptv-org/iptv) dataset. Watch it, filter it, install it as an app, and (if you're the operator) earn from it.
 
-Dark-themed, mobile-first, PWA-installable, and built to ship to the web, **Android/Android TV** and **desktop** — see the docs below.
+Dark-themed, mobile-first, PWA-installable, and built to ship to the web, **iPhone/iPad**, **Android/Android TV** and **desktop** — see the docs below.
 
 ---
 
@@ -26,6 +26,7 @@ Dark-themed, mobile-first, PWA-installable, and built to ship to the web, **Andr
 - 🧭 **TV Mode** — header toggle (auto-enables on smart-TV browsers) that scales the whole UI and adds **remote/D-pad arrow-key navigation**, focus rings and Back-key support — perfect in Samsung/LG TV browsers and Android TV
 - 📲 **TV Guide built-in** — "TV pe kaise?" dialog explains pendrive APK install (Android TV/Fire TV), browser+TV Mode (Samsung/LG) and set-top-box/cast/HDMI options (old TVs)
 - 🤖 **Ready Capacitor Android project** (`android/`) — TV (leanback) launcher, banner, D-pad support; build an APK and sideload via pendrive (see `docs/ANDROID_TV_APP.md`)
+- 🍎 **Native iOS project** (`ios/`) — SwiftUI + WKWebView shell with Picture-in-Picture, AirPlay, background audio, edge-swipe Back, offline retry and in-app server settings, built with **xtool** so it compiles on Linux/Windows **without a Mac** (see `docs/IOS_APP.md`)
 - 🎨 Dark UI (`#09090b`) with amber/orange brand accent, English UI
 
 ## 🧰 Tech Stack
@@ -101,6 +102,7 @@ bun run dev              # start dev server on http://localhost:3000
 ├── public/                     # PWA manifest, icons (icon-512.png is the master icon), robots.txt
 ├── docs/
 │   ├── ANDROID_TV_APP.md       # Capacitor wrapper → Android APK/AAB + Android TV
+│   ├── IOS_APP.md             # xtool + SwiftUI shell → iPhone/iPad, no Mac needed
 │   ├── DESKTOP_APP.md          # Electron / Tauri / PWA desktop wrappers
 │   └── MONETIZATION.md         # Ads, Razorpay subscriptions, affiliates, legal notes
 └── worklog.md                  # Development log
@@ -120,13 +122,14 @@ bun run dev              # start dev server on http://localhost:3000
   # put Caddyfile/nginx in front for HTTPS (a Caddyfile is included in the repo)
   ```
 - Set `NEXT_PUBLIC_ADSENSE_CLIENT` and `DATABASE_URL` in the host's env settings.
-- Point the Capacitor app (`server.url`) and desktop wrappers at the deployed URL — one deployment powers web + Android + TV + desktop (see docs below).
+- Point the Capacitor app (`server.url`), the iOS app (`ios/Support/Info.plist` → `StreamKaroBaseURL`) and the desktop wrappers at the deployed URL — one deployment powers web + iOS + Android + TV + desktop (see docs below).
 
 ## 📚 Going Further (docs)
 
 | Doc | What's inside |
 |---|---|
 | [docs/ANDROID_TV_APP.md](./docs/ANDROID_TV_APP.md) | Wrap the app with **Capacitor** → debug APK, signed Play Store AAB, **Android TV/leanback** manifest setup, AdMob, back-button handling |
+| [docs/IOS_APP.md](./docs/IOS_APP.md) | **Native iPhone/iPad app**: xtool + SwiftUI + WKWebView — Picture-in-Picture, AirPlay, background audio, deep links, offline screen, in-app server switch; builds on Linux/Windows with no Mac |
 | [docs/DESKTOP_APP.md](./docs/DESKTOP_APP.md) | **Electron** (recommended) / **Tauri** / **PWA-install** desktop builds for Windows, macOS, Linux + code-signing & distribution notes |
 | [docs/MONETIZATION.md](./docs/MONETIZATION.md) | **How to earn**: AdSense/AdMob display ads, Razorpay **UPI Autopay** subscriptions (₹49/₹99 tiers), affiliates, sponsorships, 90-day roadmap, legal compliance |
 

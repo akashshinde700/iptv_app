@@ -55,8 +55,9 @@ _desktop.tgz
 /android/.gradle/
 /android/app/release/
 /android/local.properties
-# iOS Xcode project — regenerate with `bunx cap add ios` (no custom signing yet)
-/ios/
+# iOS: the native xtool project in ios/ IS tracked (see docs/IOS_APP.md).
+# Build output inside it stays out of git — see ios/.gitignore.
+# (Older Capacitor iOS output, if you ever add one, goes to /ios-capacitor/)
 
 # app binaries (uploaded to the server, not committed)
 /public/downloads/*

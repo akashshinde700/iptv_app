@@ -61,8 +61,11 @@ export const DOWNLOADS: DownloadTarget[] = [
   {
     id: "ios",
     platform: "iPhone / iPad",
-    label: "iOS",
-    hint: "Coming to the App Store — for now, add to Home Screen from Safari",
+    label: "iOS 17+ · native app",
+    // The iOS app lives in ios/ and is built with xtool (no Mac needed).
+    // No public .ipa is hosted, so there is nothing to download here — the
+    // guide + the PWA route are what a visitor can actually use today.
+    hint: "Use Add to Home Screen in Safari — or build the native app from ios/ (docs/IOS_APP.md)",
     href: null,
   },
   {

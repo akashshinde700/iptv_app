@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Universal links. NOT enabled by default: the App ID needs the
+       "Associated Domains" capability, which a free personal team cannot
+       provision. Enable it only with a paid Apple Developer account:
+
+       1. ios/xtool.yml  → add  entitlementsPath: Support/StreamKaro.entitlements
+       2. replace the domain below with your deployment
+       3. set APPLE_TEAM_ID on the server so /.well-known/apple-app-site-association
+          is served (see src/app/apple-app-site-association/route.ts)
+       4. `xtool auth` with the paid account, then `xtool dev`
+
+       Until then streamkaro:// deep links keep working. -->
+  <key>com.apple.developer.associated-domains</key>
+  <array>
+    <string>applinks:www.streamkaro.aetherdevsolutions.in</string>
+  </array>
+</dict>
+</plist>

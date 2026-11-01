@@ -11,7 +11,7 @@
  */
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Check, Copy, Loader2, MonitorSmartphone, QrCode, Smartphone, Tv } from "lucide-react";
+import { Check, Copy, Loader2, MonitorSmartphone, QrCode, Share2, Smartphone, Tv } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,12 +22,14 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { fetchMyPlaylist } from "@/lib/api";
+import { shareLink } from "@/lib/ios-shell";
 import { useIsTv } from "@/lib/store";
 
 export function PlaylistDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const isTv = useIsTv();
   const [copied, setCopied] = useState(false);
   const [showQr, setShowQr] = useState(!isTv);
+  const [shared, setShared] = useState(false);
 
   const query = useQuery({
     queryKey: ["my-playlist"],
@@ -50,6 +52,17 @@ export function PlaylistDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     } catch {
       /* clipboard blocked (http / TV browser) — the URL is selectable instead */
     }
+  };
+
+  /**
+   * Sends the link to another device the way phones expect: the native iOS
+   * share sheet inside the app, the Web Share API in a browser, clipboard as a
+   * last resort. This is how people move the playlist onto their TV setup.
+   */
+  const share = async () => {
+    const result = await shareLink({ url, title: "My StreamKaro playlist" });
+    if (result === "copied") setCopied(true);
+    if (result !== "failed") setShared(true);
   };
 
   return (
@@ -91,6 +104,10 @@ export function PlaylistDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                 </Button>
                 <Button size="sm" variant="outline" className="rounded-full" onClick={() => setShowQr((v) => !v)}>
                   <QrCode className="mr-1 h-4 w-4" /> {showQr ? "Hide QR" : "Show QR"}
+                </Button>
+                <Button size="sm" variant="outline" className="rounded-full" onClick={() => void share()}>
+                  {shared ? <Check className="mr-1 h-4 w-4" /> : <Share2 className="mr-1 h-4 w-4" />}
+                  {shared ? "Shared" : "Share link"}
                 </Button>
               </div>
               <p className="mt-2 text-[11px] text-muted-foreground">
