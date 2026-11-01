@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android TV / Fire TV build.
+  Overlays the main manifest: leanback is required, touchscreen is not, and the
+  launcher entry is the D-pad (LEANBACK) one. Built via the `tv` product flavor
+  (applicationId com.streamkaro.tv).
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-feature
+        android:name="android.software.leanback"
+        android:required="true"
+        tools:replace="android:required" />
+    <uses-feature
+        android:name="android.hardware.touchscreen"
+        android:required="false"
+        tools:replace="android:required" />
+
+    <application android:banner="@drawable/banner" tools:replace="android:banner">
+        <activity
+            android:name=".MainActivity"
+            android:screenOrientation="landscape"
+            tools:replace="android:screenOrientation" />
+    </application>
+</manifest>

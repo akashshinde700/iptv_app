@@ -1,0 +1,469 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────── Multi-tenant: Organization ──────────────────────
+// One row per operator ("tenant"). Everything below is scoped to exactly one
+// Organization. The default single-operator install lives in one "root" org.
+
+model Organization {
+  id     String @id @default(cuid())
+  slug   String @unique // subdomain: <slug>.streamkaro.app
+  name   String
+  status String @default("ACTIVE") // TRIAL | ACTIVE | PAST_DUE | SUSPENDED
+
+  // Storefront branding
+  appName      String? // overrides "StreamKaro" in the customer UI
+  logoUrl      String? @db.Text
+  primaryColor String? // hex, e.g. "#f59e0b"
+  supportEmail String?
+  customDomain String? @unique // optional white-label domain (verified later)
+
+  // Platform billing (operator → us). Detailed subscription rows come in Phase 4.
+  platformPlan       String    @default("TRIAL") // TRIAL | STARTER | PRO | SCALE
+  platformTrialEndsAt DateTime?
+  platformValidUntil DateTime?
+
+  admins    Admin[]
+  portals   Portal[]
+  channels  Channel[]
+  movies    Movie[]
+  series    Series[]
+  plans     Plan[]
+  customers Customer[]
+  subscriptions Subscription[]
+  payments  Payment[]
+  auditLogs AuditLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+}
+
+// ───────────────────────────────── IPTV data ─────────────────────────────────
+
+model Channel {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  sourceId       String
+  name           String       @db.VarChar(400)
+  // Normalised name used to group the SAME channel across different portals for
+  // cross-source failover (see channelIdentityKey). null until synced/backfilled.
+  identityKey String?            @db.VarChar(255)
+  network     String?
+  logo        String?            @db.Text
+  country     String? // ISO 3166-1 alpha-2, e.g. "IN"
+  countryName String?
+  countryFlag String?
+  region      String? // derived region e.g. "Asia" (backfilled from country)
+  categories  String             @default("|") @db.VarChar(500) // pipe-delimited slugs e.g. |news|movies|
+  languages   String             @default("|") @db.VarChar(500) // pipe-delimited display names e.g. |Hindi|English|
+  website     String?            @db.Text
+  isNsfw      Boolean            @default(false)
+  isActive    Boolean            @default(true)
+  isDemo      Boolean            @default(false) // demo channels: playable even without a plan (home showcase)
+  portalId    String? // set when the channel was synced from a custom portal
+  portal      Portal?            @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  streams     Stream[]
+  overrides   CustomerOverride[]
+  planChannels PlanChannel[]
+
+  @@unique([organizationId, sourceId])
+  @@index([organizationId])
+  @@index([country])
+  @@index([region])
+  @@index([isNsfw])
+  @@index([isActive])
+  @@index([isDemo])
+  @@index([name])
+  @@index([portalId])
+  @@index([organizationId, identityKey])
+}
+
+// ─────────────────────────────── VOD (on-demand) ──────────────────────────────
+// Movies and Series imported from Xtream portals (get_vod_streams / get_series).
+// The play URL is DERIVED at serve time from the portal creds + streamId + ext, so
+// credentials are never duplicated across rows and rotate cleanly.
+
+model Movie {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  portalId       String?
+  portal         Portal?      @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  sourceId       String // stable: portal:{portalId}:vod:{streamId}
+  streamId       String // Xtream vod stream_id
+  title          String       @db.VarChar(500)
+  identityKey    String?      @db.VarChar(255) // normalised title for cross-portal dedup
+  poster         String?      @db.Text
+  plot           String?      @db.Text
+  year           String?
+  rating         String?
+  genre          String?
+  categories     String       @default("|") @db.VarChar(500)
+  containerExt   String? // mp4 | mkv | ts
+  durationSecs   Int?
+  isNsfw         Boolean      @default(false)
+  isActive       Boolean      @default(true)
+  addedAt        DateTime     @default(now())
+
+  @@unique([organizationId, sourceId])
+  @@index([organizationId])
+  @@index([portalId])
+  @@index([isActive])
+  @@index([isNsfw])
+  @@index([title])
+  @@index([organizationId, identityKey])
+}
+
+model Series {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  portalId       String?
+  portal         Portal?      @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  sourceId       String // stable: portal:{portalId}:series:{seriesId}
+  seriesId       String // Xtream series_id
+  title          String       @db.VarChar(500)
+  identityKey    String?      @db.VarChar(255)
+  poster         String?      @db.Text
+  plot           String?      @db.Text
+  year           String?
+  rating         String?
+  genre          String?
+  categories     String       @default("|") @db.VarChar(500)
+  // Episodes are fetched lazily (get_series_info) and cached here as JSON on first open.
+  episodesJson   String?      @db.LongText
+  episodesAt     DateTime?
+  isNsfw         Boolean      @default(false)
+  isActive       Boolean      @default(true)
+  addedAt        DateTime     @default(now())
+
+  @@unique([organizationId, sourceId])
+  @@index([organizationId])
+  @@index([portalId])
+  @@index([isActive])
+  @@index([isNsfw])
+  @@index([title])
+  @@index([organizationId, identityKey])
+}
+
+// A playable source for a channel. A channel can have several (primary + fallbacks);
+// the player fails over between them health-first. status: ACTIVE | DISABLED (auto-disabled
+// after FAILURE_THRESHOLD consecutive failures — see /api/streams/report). Lower priority = tried first.
+model Stream {
+  id        String  @id @default(cuid())
+  channelId String
+  channel   Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  title     String? @db.VarChar(500)
+  url       String  @db.Text
+  quality   String?
+  referrer  String? @db.Text
+  userAgent String? @db.Text
+  // which content source produced this stream (null = manual / iptv-org seed)
+  portalId  String?
+  portal    Portal? @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  priority     Int       @default(100)
+  status       String    @default("ACTIVE")
+  failureCount Int       @default(0)
+  lastFailureAt DateTime?
+  lastOkAt      DateTime?
+  lastError     String?   @db.Text
+
+  @@index([channelId])
+  @@index([portalId])
+  @@index([status])
+}
+
+// ─────────────────────────────── Custom portals ──────────────────────────────
+// type: STALKER | XTREAM | M3U_URL | M3U_FILE
+
+model Portal {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  type           String // STALKER | XTREAM | M3U_URL | M3U_FILE
+  url          String?   @db.Text // panel/server/m3u link
+  macAddress   String? // STALKER only
+  // STALKER device identity (anti-clone) — some portals lock a MAC to a device_id/serial.
+  deviceId     String? @db.Text
+  deviceId2    String? @db.Text
+  serialNumber String?
+  username     String? // XTREAM only
+  password     String?   @db.Text // XTREAM only — stored encrypted (see lib/server/crypto)
+  epgUrl       String?   @db.Text
+  status       String    @default("PENDING") // PENDING | SYNCING | ACTIVE | ERROR | INACTIVE
+  lastError    String?   @db.Text
+  lastSyncedAt DateTime?
+  expiresAt    DateTime? // auto-detected from Xtream user_info when available
+  notes        String?   @db.Text
+  isActive     Boolean   @default(true)
+  fileData     String?   @db.LongText // M3U_FILE: raw playlist content
+  syncLogs     SyncLog[]
+  channels     Channel[]
+  streams      Stream[]
+  movies       Movie[]
+  series       Series[]
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([organizationId])
+  @@index([type])
+}
+
+model SyncLog {
+  id         String    @id @default(cuid())
+  portalId   String
+  portal     Portal    @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+  added      Int       @default(0)
+  removed    Int       @default(0)
+  updated    Int       @default(0)
+  status     String    @default("RUNNING") // RUNNING | SUCCESS | ERROR
+  message    String?   @db.Text
+
+  @@index([portalId])
+}
+
+// ───────────────────────────────── Admin auth ────────────────────────────────
+
+model Admin {
+  id             String        @id @default(cuid())
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  isPlatformStaff Boolean      @default(false) // true = StreamKaro staff, can reach the platform console
+  username       String
+  email          String
+  passwordHash   String
+  role           String        @default("ADMIN") // OWNER | ADMIN  (within an org)
+  isActive       Boolean       @default(true)
+  sessions       AdminSession[]
+  auditLogs      AuditLog[]
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@unique([organizationId, username])
+  @@unique([organizationId, email])
+  @@index([organizationId])
+}
+
+model AdminSession {
+  id        String   @id @default(cuid())
+  token     String   @unique // sha256 fingerprint of the session token (raw token only lives in the cookie)
+  adminId   String
+  admin     Admin    @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  ip        String?
+  userAgent String?  @db.Text
+  createdAt DateTime @default(now())
+
+  @@index([adminId])
+}
+
+// ────────────────────────────── Plans & customers ────────────────────────────
+
+model Plan {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  description    String?       @db.Text
+  price        Int        @default(0) // INR
+  durationDays Int        @default(30)
+  isActive     Boolean    @default(true)
+  allowAdult   Boolean    @default(false)
+  maxDevices   Int        @default(1)
+  // access rules (pipe-delimited, empty = unrestricted for that dimension)
+  // Pipe-delimited rule lists. Generous width: a plan can select every category/language
+  // (default String → VARCHAR(191) overflowed once ~28+ categories were picked → save 500).
+  regions      String     @default("|") @db.VarChar(2000)
+  countries    String     @default("|") @db.VarChar(2000)
+  languages    String     @default("|") @db.VarChar(2000)
+  categories   String     @default("|") @db.VarChar(2000)
+  validFrom    DateTime?
+  validTo      DateTime?
+  customers    Customer[]
+  subscriptions Subscription[]
+  // Specific channels this plan ALWAYS includes, on top of the dimension rules above
+  // (grant-only union — see lib/server/access.ts). Empty = rules decide everything.
+  planChannels PlanChannel[]
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@index([organizationId])
+}
+
+// status = effective access status, read by customer login + the access engine:
+//          ACTIVE | INACTIVE (subscription pending) | SUSPENDED | EXPIRED | ARCHIVED
+//          Written only by lib/server/billing.ts syncCustomerAccess().
+// accountStatus = what an admin set on the account: ACTIVE | SUSPENDED | ARCHIVED
+// planId / planStartedAt / planExpiresAt mirror the current Subscription row.
+model Customer {
+  id             String            @id @default(cuid())
+  organizationId String
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  username       String
+  email          String
+  passwordHash   String
+  mobile        String?
+  status        String             @default("ACTIVE")
+  accountStatus String             @default("ACTIVE")
+  planId        String?
+  plan          Plan?              @relation(fields: [planId], references: [id], onDelete: SetNull)
+  planStartedAt DateTime?
+  planExpiresAt DateTime?
+  notes         String?            @db.Text
+  lastLoginAt   DateTime?
+  sessions      CustomerSession[]
+  overrides     CustomerOverride[]
+  subscriptions Subscription[]
+  payments      Payment[]
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  @@unique([organizationId, username])
+  @@unique([organizationId, email])
+  @@index([organizationId])
+  @@index([status])
+  @@index([accountStatus])
+  @@index([planId])
+  @@index([planExpiresAt])
+}
+
+model CustomerSession {
+  id         String   @id @default(cuid())
+  token      String   @unique // sha256 fingerprint of the session token (raw token only lives in the cookie)
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  expiresAt  DateTime
+  ip         String?
+  userAgent  String?  @db.Text
+  createdAt  DateTime @default(now())
+
+  @@index([customerId])
+}
+
+// Manual per-customer channel allow/block that overrides plan rules
+model CustomerOverride {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  channelId  String
+  channel    Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  allow      Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  @@unique([customerId, channelId])
+}
+
+// ─────────────────────────── Subscriptions & payments ───────────────────────────
+// A customer's subscription history (renewals and plan changes add rows). The current
+// one is mirrored onto Customer — see lib/server/billing.ts.
+// status: ACTIVE | PENDING | SUSPENDED | CANCELLED   (EXPIRED is derived: endsAt <= now)
+// paymentStatus: NOT_RECORDED | PENDING | PARTIALLY_PAID | PAID | FAILED | REFUNDED
+model Subscription {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customerId     String
+  customer       Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  planId         String?
+  plan           Plan?        @relation(fields: [planId], references: [id], onDelete: SetNull)
+  planName       String // snapshot — survives plan renames/deletes
+  status         String       @default("ACTIVE")
+  startsAt       DateTime
+  endsAt         DateTime
+  price          Int          @default(0) // INR, plan price at the time
+  discount       Int          @default(0)
+  amount         Int          @default(0) // price - discount
+  paymentStatus  String       @default("NOT_RECORDED")
+  autoRenew      Boolean      @default(false)
+  notes          String?      @db.Text
+  createdBy      String?
+  suspendedAt    DateTime?
+  cancelledAt    DateTime?
+  payments       Payment[]
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId])
+  @@index([customerId])
+  @@index([planId])
+  @@index([status])
+  @@index([endsAt])
+  @@index([paymentStatus])
+}
+
+// Manually recorded payments (no gateway yet). status: PAID | PENDING | FAILED | REFUNDED | CANCELLED
+model Payment {
+  id             String        @id @default(cuid())
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customerId     String
+  customer       Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  subscriptionId String?
+  subscription   Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  amount         Int // INR
+  currency       String        @default("INR")
+  method         String // CASH | UPI | CARD | BANK_TRANSFER | OTHER
+  reference      String?
+  status         String        @default("PAID")
+  paidAt         DateTime?
+  notes          String?       @db.Text
+  recordedBy     String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([organizationId])
+  @@index([customerId])
+  @@index([subscriptionId])
+  @@index([status])
+  @@index([paidAt])
+}
+
+// Specific channels explicitly added to a plan (many-to-many). Grant-only: these are
+// unioned with the plan's dimension rules, never used to restrict.
+model PlanChannel {
+  id        String  @id @default(cuid())
+  planId    String
+  plan      Plan    @relation(fields: [planId], references: [id], onDelete: Cascade)
+  channelId String
+  channel   Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([planId, channelId])
+  @@index([planId])
+  @@index([channelId])
+}
+
+// ─────────────────────────────────── Audit ───────────────────────────────────
+
+model AuditLog {
+  id             String        @id @default(cuid())
+  organizationId String? // null = platform-level event
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  adminId        String?
+  admin          Admin?        @relation(fields: [adminId], references: [id], onDelete: SetNull)
+  adminName  String   @default("system")
+  action     String // e.g. CUSTOMER_CREATE, PLAN_DEACTIVATE, PORTAL_SYNC ...
+  entityType String? // CUSTOMER | PLAN | CHANNEL | PORTAL | ADMIN
+  entityId   String?
+  oldValue   String?  @db.Text
+  newValue   String?  @db.Text
+  ip         String?
+  createdAt  DateTime @default(now())
+
+  @@index([organizationId])
+  @@index([action])
+  @@index([createdAt])
+}

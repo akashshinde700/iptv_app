@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">StreamKaro</string>
+    <string name="title_activity_main">StreamKaro</string>
+    <string name="package_name">com.streamkaro.app</string>
+    <string name="custom_url_scheme">com.streamkaro.app</string>
+</resources>
