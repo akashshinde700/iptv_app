@@ -12,6 +12,10 @@ Dark-themed, mobile-first, PWA-installable, and built to ship to the web, **Andr
 - 🔎 **Search** by channel name + **filters** for country, category and language
 - 🎬 **HLS player** (hls.js) with **alternate sources** — if one stream is down, hop to the next quality/source
 - 🛡️ **Server-side stream proxy** (`/api/proxy`) for CORS/referer/user-agent–sensitive streams
+- 🎬 **Movies & TV Shows hub** — one page for both: hero carousel, genre rails, search, **season + episode browser** with a **lazy per-series episode cache** (Xtream `get_series_info`, refreshed daily)
+- 🔌 **Pluggable media providers** — your own Xtream catalog by default; an optional third-party adapter behind `NXSHA_ENABLED`; a `MEDIA_FIXTURES=1` sample catalog for UI work with no database
+- 💬 **Subtitles + quality picker** in the player, and **resume playback** ("Resume 12:34" / "Start over", remembered per title *and* per episode)
+- 🗓️ **EPG / TV guide** — XMLTV from any source's `EPG URL`, matched to channels by tvg-id → name, shown as "On now / Up next" on the watch page
 - ❤️ **Favorites** (persisted client-side via Zustand)
 - 📱 **PWA** — installable (manifest + service worker), works like a native app on phones/desktops
 - 💎 **Premium page** — Free / Pro (₹49/mo) / Super (₹99/mo) plans with mock checkout and Razorpay/Stripe hook points
@@ -32,6 +36,9 @@ Dark-themed, mobile-first, PWA-installable, and built to ship to the web, **Andr
 | Player | **hls.js** |
 | Package manager | **Bun** |
 | Data pipeline | TypeScript seed script joining iptv-org `channels/streams/feeds/logos` datasets |
+| On-demand + guide | Xtream Movies/Series sync, XMLTV EPG parser, provider-agnostic media API |
+
+> 📚 **New:** the Movies & TV hub, series pipeline, subtitles, resume and EPG are documented in [`docs/MEDIA_HUB.md`](docs/MEDIA_HUB.md).
 
 ## 🚀 Quickstart
 

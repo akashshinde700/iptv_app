@@ -28,7 +28,7 @@ interface NavItem {
 const PRIMARY_NAV: NavItem[] = [
   { name: "home", label: "Home", icon: Home },
   { name: "browse", label: "Live TV", icon: Tv },
-  { name: "movies", label: "Movies", icon: Film },
+  { name: "movies", label: "Movies & TV", icon: Film },
   { name: "search", label: "Search", icon: Search },
   { name: "favorites", label: "Favorites", icon: Heart },
   { name: "history", label: "History", icon: History },

@@ -26,8 +26,8 @@ import { SearchView } from "@/components/tv/SearchView";
 import { FavoritesView, HistoryView } from "@/components/tv/FavoritesView";
 import { PremiumView } from "@/components/tv/PremiumView";
 import { WatchView } from "@/components/tv/WatchView";
-import { MoviesView } from "@/components/tv/MoviesView";
-import { MovieView } from "@/components/tv/MovieView";
+import { MediaHubView } from "@/components/tv/MediaHubView";
+import { MediaTitleView } from "@/components/tv/MediaTitleView";
 import { AdminView } from "@/components/admin/AdminView";
 import { AccountView } from "@/components/tv/AccountView";
 import { SettingsView } from "@/components/tv/SettingsView";
@@ -54,6 +54,7 @@ const BACK_KEY_CODES = new Set([461, 10009]);
 function viewKey(view: View): string {
   if (view.name === "watch") return `watch-${view.channelId}`;
   if (view.name === "movie") return `movie-${view.movieId}`;
+  if (view.name === "title") return `title-${view.id}`;
   return view.name;
 }
 
@@ -221,8 +222,9 @@ export function AppShell() {
             <div key={viewKey(view)} data-view={view.name} className="animate-in fade-in duration-200">
               {view.name === "home" && <HomeView />}
               {view.name === "browse" && <BrowseView />}
-              {view.name === "movies" && <MoviesView />}
-              {view.name === "movie" && <MovieView movieId={view.movieId} />}
+              {view.name === "movies" && <MediaHubView />}
+              {view.name === "title" && <MediaTitleView key={view.id} id={view.id} />}
+              {view.name === "movie" && <MediaTitleView key={view.movieId} id={`catalog:movie:${view.movieId}`} />}
               {view.name === "search" && <SearchView />}
               {view.name === "favorites" && <FavoritesView />}
               {view.name === "history" && <HistoryView />}

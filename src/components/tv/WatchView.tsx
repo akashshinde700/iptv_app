@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AdSlot } from "@/components/tv/AdSlot";
 import { Player } from "@/components/tv/Player";
+import { GuideStrip } from "@/components/tv/GuideStrip";
 import { ChannelCard } from "@/components/tv/ChannelCard";
 import { ChannelRow } from "@/components/tv/ChannelRow";
 import { StateView, describeError } from "@/components/tv/StateView";
@@ -252,6 +253,8 @@ export function WatchView({ channelId }: { channelId: string }) {
             onSourceError={handleSourceError}
             onSourceOk={handleSourceOk}
           />
+
+          <GuideStrip channelId={channel.id} />
 
           {/* Channel info */}
           <div className="mt-4 flex flex-wrap items-start justify-between gap-3">
