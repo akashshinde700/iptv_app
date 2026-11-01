@@ -16,6 +16,7 @@ export type View =
   | { name: "download" }
   | { name: "movies" }
   | { name: "movie"; movieId: string }
+  | { name: "title"; id: string }
   | { name: "watch"; channelId: string };
 
 /**
@@ -61,6 +62,13 @@ export interface RecentMovie {
   rating: string | null;
 }
 
+/** Resume position for a VOD title (`catalog:series:…:S1E2` style keys for episodes). */
+export interface PlaybackProgress {
+  seconds: number;
+  duration: number;
+  updatedAt: number;
+}
+
 export interface BrowseFilters {
   search: string;
   country: string;
@@ -98,6 +106,8 @@ interface AppState {
   favorites: string[];
   recents: string[];
   recentMovies: RecentMovie[];
+  /** media-hub resume positions, keyed by the media id the player was opened with */
+  progress: Record<string, PlaybackProgress>;
   premium: boolean;
   /** TV Mode: big UI + remote/D-pad arrow-key navigation (user toggle on web) */
   tvMode: boolean;
@@ -123,6 +133,9 @@ interface AppState {
   addRecent: (channelId: string) => void;
   addRecentMovie: (movie: RecentMovie) => void;
   clearRecents: () => void;
+  /** remember where the viewer stopped (throttled by the player, not per second) */
+  saveProgress: (id: string, seconds: number, duration: number) => void;
+  clearProgress: (id: string) => void;
   setPremium: (value: boolean) => void;
   setTvMode: (value: boolean) => void;
   setPlatform: (info: { platform: Platform; isNativeShell: boolean; isElectron: boolean }) => void;
@@ -140,7 +153,13 @@ function snapshot(): RestoreTarget {
 }
 
 function sameView(a: View, b: View): boolean {
-  return a.name === b.name && (a.name !== "watch" || (b.name === "watch" && a.channelId === b.channelId));
+  if (a.name !== b.name) return false;
+  // views that carry an id are only "the same" when the id matches — otherwise opening a
+  // second title/channel from the first would be swallowed as a no-op navigation
+  if (a.name === "watch") return b.name === "watch" && a.channelId === b.channelId;
+  if (a.name === "title") return b.name === "title" && a.id === b.id;
+  if (a.name === "movie") return b.name === "movie" && a.movieId === b.movieId;
+  return true;
 }
 
 export const useAppStore = create<AppState>()(
@@ -155,6 +174,7 @@ export const useAppStore = create<AppState>()(
       favorites: [],
       recents: [],
       recentMovies: [],
+      progress: {},
       premium: false,
       tvMode: false,
       platform: "web",
@@ -242,6 +262,28 @@ export const useAppStore = create<AppState>()(
 
       clearRecents: () => set({ recents: [] }),
 
+      saveProgress: (id, seconds, duration) =>
+        set((state) => {
+          if (!Number.isFinite(seconds) || seconds < 5) return {};
+          // finished (or nearly) → forget it instead of offering a resume point at the credits
+          if (Number.isFinite(duration) && duration > 0 && seconds > duration - 30) {
+            const { [id]: _dropped, ...rest } = state.progress;
+            return { progress: rest };
+          }
+          const next = { ...state.progress, [id]: { seconds, duration, updatedAt: Date.now() } };
+          // keep the store small — 60 titles is plenty of history
+          const entries = Object.entries(next)
+            .sort((a, b) => b[1].updatedAt - a[1].updatedAt)
+            .slice(0, 60);
+          return { progress: Object.fromEntries(entries) };
+        }),
+
+      clearProgress: (id) =>
+        set((state) => {
+          const { [id]: _dropped, ...rest } = state.progress;
+          return { progress: rest };
+        }),
+
       setPremium: (value) => set({ premium: value }),
       setTvMode: (value) => set({ tvMode: value }),
       setPlatform: (info) => set(info),
@@ -258,6 +300,7 @@ export const useAppStore = create<AppState>()(
         favorites: state.favorites,
         recents: state.recents,
         recentMovies: state.recentMovies,
+        progress: state.progress,
         premium: state.premium,
         tvMode: state.tvMode,
       }),

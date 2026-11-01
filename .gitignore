@@ -89,3 +89,6 @@ __pycache__/
 
 # Legacy local SQLite DB dump (huge; app uses MySQL now)
 db/
+
+# generated SQLite twin of the Prisma schema (local dev only)
+prisma/schema.sqlite.prisma

@@ -16,6 +16,7 @@ import {
   Scan,
   SkipBack,
   SkipForward,
+  Subtitles,
   Tv,
   Volume2,
   VolumeX,
@@ -75,6 +76,14 @@ interface HlsLevel {
   bitrate: number;
 }
 
+/** A subtitle track offered by the media source (already pointed at /api/proxy). */
+export interface PlayerSubtitle {
+  id: string;
+  label: string;
+  lang: string;
+  url: string;
+}
+
 export interface PlayerProps {
   stream: StreamInfo | null;
   /** channel name */
@@ -92,6 +101,12 @@ export interface PlayerProps {
   /** health-aware failover: the current source failed / succeeded (WatchView reports + advances) */
   onSourceError?: (streamId: string, error?: string) => void;
   onSourceOk?: (streamId: string) => void;
+  /** Subtitle tracks for this source (VOD). Empty/undefined hides the subtitle picker. */
+  subtitles?: PlayerSubtitle[];
+  /** Resume playback at this position (seconds) on first load — VOD "Continue watching". */
+  startAt?: number;
+  /** Playback heartbeat (throttled to ~5s) so the app can persist a resume position. */
+  onProgress?: (seconds: number, duration: number) => void;
 }
 
 /**
@@ -281,6 +296,9 @@ function PlayerCore({
   onRetry,
   onUseNative,
   seekable,
+  subtitles,
+  startAt,
+  onProgress,
 }: PlayerProps & { onRetry: () => void; onUseNative?: () => void }) {
   const isTv = useIsTv();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -304,6 +322,9 @@ function PlayerCore({
   const [controlsVisible, setControlsVisible] = useState(true);
   const [reconnectAttempt, setReconnectAttempt] = useState(0);
   const reconnectAttempts = useRef(0);
+  const [activeSubtitle, setActiveSubtitle] = useState("off");
+  const resumedRef = useRef(false);
+  const progressRef = useRef(0);
   const mutedRef = useRef(muted);
   // Report each source's health at most once per mount (the core remounts per source),
   // so a healthy stream isn't spammed by repeated onPlaying and a dead one reports once.
@@ -554,6 +575,18 @@ function PlayerCore({
     };
   }, [stream?.id, isTv]);
 
+  // VTT/SRT tracks are <track> children: the browser ignores the `default` attribute after
+  // mount, so we flip `mode` imperatively whenever the viewer picks a track.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const tracks = video.textTracks;
+    for (let i = 0; i < tracks.length; i += 1) {
+      const track = tracks[i];
+      track.mode = subtitles?.[i] && subtitles[i].id === activeSubtitle ? "showing" : "disabled";
+    }
+  }, [activeSubtitle, subtitles]);
+
   const togglePlay = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -711,11 +744,49 @@ function PlayerCore({
           reportOk();
         }}
         onPause={() => setStatus((s) => (s === "error" ? s : "paused"))}
-        onLoadedMetadata={() => setDuration(videoRef.current?.duration ?? 0)}
+        onLoadedMetadata={() => {
+          const video = videoRef.current;
+          setDuration(video?.duration ?? 0);
+          // Resume exactly once per source, and only when the viewer actually has a
+          // position to resume from (never fight a manual seek).
+          if (video && !resumedRef.current && startAt && startAt > 5) {
+            resumedRef.current = true;
+            const target = Number.isFinite(video.duration) && video.duration > 0
+              ? Math.min(startAt, Math.max(0, video.duration - 10))
+              : startAt;
+            try {
+              video.currentTime = target;
+              setCurrentTime(target);
+            } catch {
+              /* seeking unsupported (some live streams) */
+            }
+          }
+        }}
         onDurationChange={() => setDuration(videoRef.current?.duration ?? 0)}
-        onTimeUpdate={() => setCurrentTime(videoRef.current?.currentTime ?? 0)}
+        onTimeUpdate={() => {
+          const video = videoRef.current;
+          if (!video) return;
+          setCurrentTime(video.currentTime);
+          // throttled heartbeat: persist a resume point every ~5s of playback
+          if (onProgress && video.currentTime - progressRef.current >= 5) {
+            progressRef.current = video.currentTime;
+            onProgress(video.currentTime, Number.isFinite(video.duration) ? video.duration : 0);
+          }
+        }}
+        onEnded={() => onProgress?.(0, 0)}
         onClick={togglePlay}
-      />
+      >
+        {(subtitles ?? []).map((track) => (
+          <track
+            key={track.id}
+            kind="subtitles"
+            src={track.url}
+            srcLang={track.lang}
+            label={track.label}
+            default={activeSubtitle === track.id}
+          />
+        ))}
+      </video>
 
       {/* Loading / buffering spinner */}
       {(status === "loading" || status === "buffering") && (
@@ -892,6 +963,31 @@ function PlayerCore({
             >
               <Heart className={cn("h-5 w-5", isFavorite && "fill-current")} />
             </Button>
+          )}
+
+          {(subtitles ?? []).length > 0 && (
+            <Select value={activeSubtitle} onValueChange={(val) => setActiveSubtitle(val)}>
+              <SelectTrigger
+                className={cn(
+                  "w-[6.5rem] rounded-full border-white/20 bg-black/50 text-xs text-white [&>svg]:text-white",
+                  isTv ? "h-11" : "h-9",
+                )}
+                aria-label="Subtitles"
+              >
+                <span className="flex items-center gap-1.5 truncate">
+                  <Subtitles className="h-4 w-4 shrink-0" />
+                  <SelectValue placeholder="Off" />
+                </span>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="off">Off</SelectItem>
+                {(subtitles ?? []).map((track) => (
+                  <SelectItem key={track.id} value={track.id}>
+                    {track.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           )}
 
           {levelOptions.length > 1 && (

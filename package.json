@@ -18,7 +18,9 @@
     "migrate:sqlite": "bun scripts/migrate-sqlite-to-mysql.ts",
     "seed:admin": "bun scripts/seed-admin.ts",
     "cap:sync": "cap sync android",
-    "cap:open": "cap open android"
+    "cap:open": "cap open android",
+    "db:dev:schema": "bun scripts/make-dev-schema.ts",
+    "dev:fixtures": "MEDIA_FIXTURES=1 next dev -p 3000"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.1",
