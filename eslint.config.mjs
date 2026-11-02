@@ -66,7 +66,6 @@ const eslintConfig = [...nextCoreWebVitals, ...nextTypescript, {
     "skills",
     // Generated / vendored output that is not ours to lint.
     "android/app/src/main/assets/**",
-    "public/**",
   ]
 }];
 
