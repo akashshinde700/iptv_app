@@ -59,7 +59,7 @@ import {
   type AdminCustomer,
   type AdminPlan,
 } from "@/lib/admin-api";
-import { daysLeft, fmtDate, fmtNumber, StatusBadge } from "./shared";
+import { daysLeft, fmtDate, fmtNumber, StatusBadge, ConfirmButton, TableState } from "./shared";
 
 const STATUSES = ["ALL", "ACTIVE", "INACTIVE", "SUSPENDED", "EXPIRED"];
 
@@ -83,6 +83,18 @@ function CustomerFormDialog({
   const [status, setStatus] = useState(customer?.status ?? "ACTIVE");
   const [planId, setPlanId] = useState(customer?.planId ?? "none");
   const [notes, setNotes] = useState(customer?.notes ?? "");
+  const [formError, setFormError] = useState<string | null>(null);
+
+  /** UX-07: the dialog used to submit empty required fields and surface the server's error. */
+  const validationError = (() => {
+    if (!name.trim()) return "Naam likho";
+    if (!customer && !username.trim()) return "Username likho";
+    if (!customer && username.trim().length < 3) return "Username kam se kam 3 characters";
+    if (!customer && password.length < 6) return "Password kam se kam 6 characters";
+    if (customer && password && password.length < 6) return "Naya password kam se kam 6 characters";
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())) return "Valid email likho";
+    return null;
+  })();
 
   const save = useMutation({
     mutationFn: async () => {
@@ -113,7 +125,10 @@ function CustomerFormDialog({
       queryClient.invalidateQueries({ queryKey: ["admin-stats"] });
       onClose();
     },
-    onError: (error: Error) => toast.error(error.message),
+    onError: (error: Error) => {
+      setFormError(error.message);
+      toast.error(error.message);
+    },
   });
 
   return (
@@ -191,9 +206,20 @@ function CustomerFormDialog({
           <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="Payment info, remark…" />
         </div>
       </div>
-      <DialogFooter>
+      {formError && <p className="text-xs text-red-400">{formError}</p>}
+      <DialogFooter className="items-center gap-2">
         <Button variant="ghost" onClick={onClose}>Cancel</Button>
-        <Button onClick={() => save.mutate()} disabled={save.isPending}>
+        <Button
+          onClick={() => {
+            if (validationError) {
+              setFormError(validationError);
+              return;
+            }
+            setFormError(null);
+            save.mutate();
+          }}
+          disabled={save.isPending}
+        >
           {save.isPending ? "Saving…" : customer ? "Save" : "Create"}
         </Button>
       </DialogFooter>
@@ -331,16 +357,15 @@ export function CustomersSection() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {customersQuery.isLoading && (
-              <TableRow>
-                <TableCell colSpan={6} className="py-10 text-center text-zinc-500">Load ho raha hai…</TableCell>
-              </TableRow>
-            )}
-            {!customersQuery.isLoading && items.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={6} className="py-10 text-center text-zinc-500">Koi customer nahi mila.</TableCell>
-              </TableRow>
-            )}
+            <TableState
+              colSpan={6}
+              isLoading={customersQuery.isLoading}
+              isError={customersQuery.isError}
+              error={customersQuery.error}
+              onRetry={() => customersQuery.refetch()}
+              isEmpty={items.length === 0}
+              empty="Koi customer nahi mila — search hata ke dekho, ya pehla customer banao."
+            />
             {items.map((customer) => {
               const left = daysLeft(customer.planExpiresAt);
               return (
@@ -416,16 +441,14 @@ export function CustomersSection() {
                       >
                         <Pencil className="h-4 w-4" />
                       </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        title="Delete"
-                        onClick={() => {
-                          if (confirm(`${customer.name} ko delete karein?`)) del.mutate(customer.id);
-                        }}
+                      <ConfirmButton
+                        titleAttr="Delete"
+                        title={`Delete ${customer.name}?`}
+                        description="Their login, plan history and payments are removed with them. This cannot be undone."
+                        onConfirm={() => del.mutate(customer.id)}
                       >
                         <Trash2 className="h-4 w-4 text-red-400" />
-                      </Button>
+                      </ConfirmButton>
                     </div>
                   </TableCell>
                 </TableRow>

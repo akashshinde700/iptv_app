@@ -12,7 +12,7 @@
  */
 import type { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
-import { audit, destroyAllCustomerSessions, hashPassword, HttpError, type AdminIdentity } from '@/lib/server/auth'
+import { audit, destroyAllCustomerSessions, hashPassword, HttpError, isUniqueViolation, type AdminIdentity } from '@/lib/server/auth'
 import {
   PAYMENT_METHODS,
   accessMirror,
@@ -66,6 +66,42 @@ export async function syncCustomerAccess(customerId: string, client: Client = db
   const mirror = accessMirror(customer.subscriptions, customer.accountStatus)
   await client.customer.update({ where: { id: customerId }, data: mirror })
   return mirror
+}
+
+/**
+ * BUG-14: keep the cached access mirror in step with the clock.
+ *
+ * `Customer.status` / `planExpiresAt` are a *mirror* of the subscription rows, written by
+ * `syncCustomerAccess()` whenever an admin touches a customer. Nothing ran when a plan simply ran
+ * out, so a customer whose plan ended yesterday still read ACTIVE until somebody opened their row
+ * — they kept browsing, and the dashboard's "expired" counts lagged reality.
+ *
+ * This is the missing scheduler step: re-derive the mirror for customers whose recorded expiry has
+ * passed (and for anyone still flagged ACTIVE with no live subscription left). Idempotent, bounded,
+ * and safe to run as often as you like.
+ */
+export async function reconcileCustomerAccess(options: { limit?: number; now?: Date } = {}) {
+  const now = options.now ?? new Date()
+  const limit = Math.max(1, Math.min(1000, options.limit ?? 200))
+
+  // Cheap, index-backed candidate query: expiry in the past but still believed to be active.
+  const candidates = await db.customer.findMany({
+    where: {
+      status: { in: ['ACTIVE', 'INACTIVE'] },
+      planExpiresAt: { lt: now },
+    },
+    select: { id: true, status: true },
+    take: limit,
+    orderBy: { planExpiresAt: 'asc' },
+  })
+
+  let changed = 0
+  for (const candidate of candidates) {
+    const mirror = await syncCustomerAccess(candidate.id).catch(() => null)
+    if (mirror && mirror.status !== candidate.status) changed += 1
+  }
+
+  return { checked: candidates.length, changed, at: now.toISOString() }
 }
 
 /**
@@ -177,19 +213,27 @@ export async function createCustomer(
     throw new HttpError(409, clash.username === username ? 'This username is already taken' : 'This email is already used')
   }
 
-  const customer = await db.customer.create({
-    data: {
-      organizationId,
-      name,
-      username,
-      email,
-      passwordHash: hashPassword(password),
-      mobile: input.mobile?.trim() || null,
-      notes: input.notes?.trim() || null,
-      status: 'ACTIVE',
-      accountStatus: 'ACTIVE',
-    },
-  })
+  // The pre-check above is advisory; the unique index is what actually guarantees it.
+  const customer = await db.customer
+    .create({
+      data: {
+        organizationId,
+        name,
+        username,
+        email,
+        passwordHash: hashPassword(password),
+        mobile: input.mobile?.trim() || null,
+        notes: input.notes?.trim() || null,
+        status: 'ACTIVE',
+        accountStatus: 'ACTIVE',
+      },
+    })
+    .catch((error: unknown) => {
+      if (isUniqueViolation(error)) {
+        throw new HttpError(409, 'That username or email is already used in this organization')
+      }
+      throw error
+    })
 
   await audit({
     organizationId,

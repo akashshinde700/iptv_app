@@ -1,6 +1,6 @@
 import { db } from '@/lib/db'
 import { ADMIN_COOKIE, clientIp, createAdminSession, rateLimit, sessionCookie, verifyPassword } from '@/lib/server/auth'
-import { resolveTenantId } from '@/lib/server/tenant'
+import { resolveTenantId, storefrontSlugFromHost } from '@/lib/server/tenant'
 
 export const dynamic = 'force-dynamic'
 
@@ -25,11 +25,18 @@ export async function POST(request: Request) {
       return Response.json({ error: 'Username aur password dono zaroori hain' }, { status: 400 })
     }
 
+    /**
+     * SEC-06: platform staff used to be able to sign in through ANY operator's storefront
+     * (`acme.streamkaro.app/admin`), which meant a support account appeared as a valid login on a
+     * customer-facing page — and gave that page a working cross-tenant entry point. Platform staff
+     * now sign in only on the platform host (apex / no tenant slug); on a storefront, only that
+     * organization's own admins are accepted.
+     */
+    const onTenantStorefront = storefrontSlugFromHost(request.headers.get('host')) !== null
     const admin = await db.admin.findFirst({
-      // Platform staff can sign in against any tenant host; org admins only their own.
       where: {
         OR: [{ username }, { email: username }],
-        AND: [{ OR: [{ organizationId }, { isPlatformStaff: true }] }],
+        AND: [{ OR: onTenantStorefront ? [{ organizationId }] : [{ organizationId }, { isPlatformStaff: true }] }],
       },
     })
     if (!admin || !admin.isActive || !verifyPassword(password, admin.passwordHash)) {

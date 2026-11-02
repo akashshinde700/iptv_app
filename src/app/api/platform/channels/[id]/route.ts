@@ -28,9 +28,9 @@ export const PATCH = platformRouteCtx<{ id: string }>(async (request, { params }
   const body = await readJson<{ action?: string }>(request)
   const action = body.action
   if (action === 'disable') {
-    await db.stream.updateMany({ where: { channelId: { in: target.ids } }, data: { status: 'DISABLED', lastError: 'Disabled by operator' } })
+    await db.stream.updateMany({ where: { channelId: { in: target.ids } }, data: { status: 'DISABLED', disabledBy: 'OPERATOR', lastError: 'Disabled by operator' } })
   } else if (action === 'enable') {
-    await db.stream.updateMany({ where: { channelId: { in: target.ids } }, data: { status: 'ACTIVE', failureCount: 0, lastError: null } })
+    await db.stream.updateMany({ where: { channelId: { in: target.ids } }, data: { status: 'ACTIVE', disabledBy: null, failureCount: 0, lastError: null } })
   } else {
     throw new HttpError(400, "action must be 'disable' or 'enable'")
   }

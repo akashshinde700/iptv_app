@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Apple, Check, Download, Monitor, MonitorDown, Smartphone, Tv, MonitorSmartphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { getInstallPrompt } from "@/components/tv/AppShell";
 import { APP_VERSION, DOWNLOADS, type DownloadTarget } from "@/lib/downloads";
+import type { DownloadAvailability } from "@/app/api/app/downloads/route";
 import { useAppStore } from "@/lib/store";
 
 const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -29,6 +31,20 @@ export function DownloadView() {
     return () => window.removeEventListener("streamkaro:installable", check);
   }, []);
 
+  // Ask the server which artifacts actually exist. A download button that 404s is worse than
+  // an honest "not uploaded yet", and this also picks up size for the label.
+  const availability = useQuery({
+    queryKey: ["app-downloads"],
+    queryFn: async (): Promise<DownloadAvailability[]> => {
+      const res = await fetch("/api/app/downloads");
+      if (!res.ok) return [];
+      const data = (await res.json()) as { targets?: DownloadAvailability[] };
+      return data.targets ?? [];
+    },
+    staleTime: 60_000,
+  });
+  const statusById = new Map((availability.data ?? []).map((t) => [t.id, t]));
+
   const isAndroid = /android/i.test(ua);
   const isWindows = /windows/i.test(ua);
   const primaryId = isAndroid ? "android" : isWindows ? "win" : null;
@@ -48,7 +64,12 @@ export function DownloadView() {
 
       <div className="mt-8 grid gap-3 sm:grid-cols-2">
         {DOWNLOADS.map((d) => (
-          <DownloadCard key={d.id} target={d} highlight={d.id === primaryId} />
+          <DownloadCard
+            key={d.id}
+            target={d}
+            availability={statusById.get(d.id)}
+            highlight={d.id === primaryId}
+          />
         ))}
       </div>
 
@@ -121,9 +142,26 @@ export function DownloadView() {
   );
 }
 
-function DownloadCard({ target, highlight }: { target: DownloadTarget; highlight?: boolean }) {
+function formatSize(bytes: number | null | undefined): string | undefined {
+  if (!bytes) return undefined;
+  const mb = bytes / (1024 * 1024);
+  return mb >= 1 ? `~${Math.round(mb)} MB` : `~${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+function DownloadCard({
+  target,
+  availability,
+  highlight,
+}: {
+  target: DownloadTarget;
+  availability?: DownloadAvailability;
+  highlight?: boolean;
+}) {
   const Icon = ICONS[target.id] ?? Download;
-  const available = !!target.href;
+  // Still checking → show the button (most links do exist); once we know, respect the answer.
+  const checked = !!availability;
+  const available = availability ? availability.available : !!target.href;
+  const size = formatSize(availability?.sizeBytes) ?? target.size;
 
   return (
     <div
@@ -149,13 +187,24 @@ function DownloadCard({ target, highlight }: { target: DownloadTarget; highlight
       </div>
       <p className="mt-3 text-xs text-muted-foreground">{target.hint}</p>
       <div className="mt-4">
-        {available ? (
-          <a href={target.href!} download>
+        {available && target.href ? (
+          <a href={target.href} download>
             <Button size="sm" className="w-full rounded-full">
               <Download className="mr-1.5 h-4 w-4" />
-              Download{target.size ? ` · ${target.size}` : ""}
+              Download{size ? ` · ${size}` : ""}
             </Button>
           </a>
+        ) : target.href && checked ? (
+          // The link exists in config but the build is not on the server yet — say so plainly
+          // instead of handing the visitor a 404.
+          <>
+            <Button size="sm" variant="outline" disabled className="w-full rounded-full opacity-60">
+              <Check className="mr-1.5 h-4 w-4" /> Build not uploaded yet
+            </Button>
+            <p className="mt-2 text-[11px] text-muted-foreground/70">
+              Use “Install as an app” below — same channels, no download.
+            </p>
+          </>
         ) : (
           <Button size="sm" variant="outline" disabled className="w-full rounded-full opacity-60">
             <Check className="mr-1.5 h-4 w-4" /> Coming soon

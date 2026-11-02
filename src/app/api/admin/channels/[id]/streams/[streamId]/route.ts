@@ -47,6 +47,9 @@ export const PATCH = adminRouteCtx(async (request, { params }, admin) => {
       return Response.json({ error: "status must be ACTIVE or DISABLED" }, { status: 400 })
     }
     data.status = next
+    // Record WHO switched it off. An OPERATOR disable is authoritative: the health sweep and
+    // client "ok" reports can no longer flip it back on (BUG-07).
+    data.disabledBy = next === 'DISABLED' ? 'OPERATOR' : null
     // Re-enabling a source gives it a clean slate so it isn't re-disabled on the first hiccup.
     if (next === 'ACTIVE') {
       data.failureCount = 0
@@ -57,6 +60,7 @@ export const PATCH = adminRouteCtx(async (request, { params }, admin) => {
   // Explicit "reset health" clears the failure streak and reactivates the source.
   if (body.resetHealth) {
     data.status = 'ACTIVE'
+    data.disabledBy = null
     data.failureCount = 0
     data.lastError = null
     data.lastFailureAt = null

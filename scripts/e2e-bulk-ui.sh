@@ -20,8 +20,9 @@ sleep 2
 $B find text "Admin Panel" click || $B eval "document.querySelectorAll('button,a').forEach(e=>{if(e.textContent.trim()==='Admin Panel')e.click()})"
 sleep 1
 $B wait "#admin-user"
-$B fill "#admin-user" "admin"
-$B fill "#admin-pass" "StreamKaro@2024"
+: "${ADMIN_PASSWORD:?Set ADMIN_PASSWORD before running this script (do not hardcode it)}"
+$B fill "#admin-user" "${ADMIN_USERNAME:-admin}"
+$B fill "#admin-pass" "$ADMIN_PASSWORD"
 $B find text "Login karo" click
 sleep 2
 $B wait "text=Dashboard" 2>/dev/null || true

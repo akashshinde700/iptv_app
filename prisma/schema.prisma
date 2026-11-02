@@ -94,6 +94,9 @@ model Channel {
   @@index([name])
   @@index([portalId])
   @@index([organizationId, identityKey])
+  // The catalog list query: org + active + newest/name, and the health filter in the UI.
+  @@index([organizationId, isActive, name])
+  @@index([organizationId, healthStatus])
 }
 
 // ─────────────────────────────── VOD (on-demand) ──────────────────────────────
@@ -185,6 +188,10 @@ model Stream {
   lastProbeAt   DateTime?
   latencyMs     Int?
   status       String    @default("ACTIVE")
+  // Why a stream is DISABLED: "AUTO" (failure threshold / probe) or "OPERATOR" (an admin switched
+  // it off). A passing probe or a client "ok" report may only revive an AUTO-disabled source —
+  // an operator's decision is authoritative until an operator reverses it.
+  disabledBy   String?
   failureCount Int       @default(0)
   lastFailureAt DateTime?
   lastOkAt      DateTime?
@@ -194,6 +201,9 @@ model Stream {
   @@index([portalId])
   @@index([status])
   @@index([lastProbeAt])
+  // The health sweep's hot query: "this org's streams, oldest probe first".
+  @@index([channelId, status])
+  @@index([status, lastProbeAt])
 }
 
 // ─────────────────────────────── Custom portals ──────────────────────────────
@@ -352,6 +362,10 @@ model Customer {
   @@index([accountStatus])
   @@index([planId])
   @@index([planExpiresAt])
+  // Admin customer list filters: org + effective status, and org + account status.
+  @@index([organizationId, status])
+  @@index([organizationId, accountStatus])
+  @@index([organizationId, createdAt])
 }
 
 model CustomerSession {
@@ -416,6 +430,9 @@ model Subscription {
   @@index([status])
   @@index([endsAt])
   @@index([paymentStatus])
+  // "is this customer's access still current?" and the expiry sweep.
+  @@index([customerId, status])
+  @@index([status, endsAt])
 }
 
 // Manually recorded payments (no gateway yet). status: PAID | PENDING | FAILED | REFUNDED | CANCELLED
@@ -480,4 +497,6 @@ model AuditLog {
   @@index([organizationId])
   @@index([action])
   @@index([createdAt])
+  // The audit log is always read as "this org, newest first".
+  @@index([organizationId, createdAt])
 }

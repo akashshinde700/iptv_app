@@ -39,6 +39,11 @@ export const RESERVED_SLUGS = new Set([
   'root', 'internal', 'test', 'staging', 'dev',
 ])
 
+/** The operator slug encoded in the host (`acme.streamkaro.app` → `acme`), or null on the apex. */
+export function storefrontSlugFromHost(host: string | null): string | null {
+  return slugFromHost(host)
+}
+
 function slugFromHost(host: string | null): string | null {
   if (!host) return null
   const bare = host.split(':')[0].toLowerCase().trim()
@@ -139,4 +144,48 @@ export async function resolveActiveTenant(request: Request): Promise<TenantConte
     throw new HttpError(403, 'This storefront is currently unavailable — please contact the operator')
   }
   return tenant
+}
+
+/**
+ * Absolute origin to put in customer-facing URLs (playlists, share links, webhooks).
+ *
+ * `new URL(request.url).origin` looks right and is wrong behind a reverse proxy / CDN: the Node
+ * server sees the *internal* origin (`http://localhost:3000`), so a playlist handed to VLC was
+ * full of links VLC could not reach from the user's device. Order of trust:
+ *
+ *   1. `PUBLIC_BASE_URL` — set by the operator for the canonical deployment URL.
+ *   2. The proxy headers (`x-forwarded-host` + `x-forwarded-proto`), but only when the forwarded
+ *      host is one we recognise (our base domains, a tenant subdomain, or a registered custom
+ *      domain passed in `knownHosts`), so a client cannot inject an arbitrary host.
+ *   3. The request's own origin (dev, and anything we could not classify).
+ */
+export function publicOrigin(request: Request, knownHosts: string[] = []): string {
+  const configured = process.env.PUBLIC_BASE_URL?.trim()
+  if (configured) {
+    try {
+      return new URL(configured).origin
+    } catch {
+      /* misconfigured — fall through */
+    }
+  }
+
+  const forwardedHost = (request.headers.get('x-forwarded-host') ?? '').split(',')[0]?.trim().toLowerCase()
+  const forwardedProto = (request.headers.get('x-forwarded-proto') ?? '').split(',')[0]?.trim().toLowerCase()
+  if (forwardedHost && isKnownHost(forwardedHost, knownHosts)) {
+    const proto = forwardedProto === 'http' || forwardedProto === 'https' ? forwardedProto : 'https'
+    return `${proto}://${forwardedHost}`
+  }
+
+  return new URL(request.url).origin
+}
+
+function isKnownHost(host: string, knownHosts: string[]): boolean {
+  const bare = host.split(':')[0]?.toLowerCase() ?? ''
+  if (!bare) return false
+  if (APEX_HOSTS.has(bare)) return true
+  if (knownHosts.some((known) => known.toLowerCase() === bare)) return true
+  for (const base of BASE_DOMAINS) {
+    if (bare === base || bare.endsWith(`.${base}`)) return true
+  }
+  return bare.endsWith('.localhost')
 }

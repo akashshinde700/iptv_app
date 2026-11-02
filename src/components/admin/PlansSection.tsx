@@ -35,7 +35,7 @@ import {
   updateAdminPlan,
   type AdminPlan,
 } from "@/lib/admin-api";
-import { MultiSelect, fmtNumber } from "./shared";
+import { MultiSelect, fmtNumber, ConfirmButton, TableState } from "./shared";
 
 function PlanFormDialog({
   open,
@@ -59,6 +59,19 @@ function PlanFormDialog({
   const [countries, setCountries] = useState<string[]>(plan?.countries ?? []);
   const [languages, setLanguages] = useState<string[]>(plan?.languages ?? []);
   const [categories, setCategories] = useState<string[]>(plan?.categories ?? []);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  /** UX-07: catch empty/invalid numbers here instead of letting the API 400 after a round-trip. */
+  const validationError = (() => {
+    if (!name.trim()) return "Plan name likho";
+    const p = Number(price);
+    if (!Number.isFinite(p) || p < 0) return "Price 0 ya usse zyada honi chahiye";
+    const d = Number(durationDays);
+    if (!Number.isInteger(d) || d < 1 || d > 3650) return "Duration 1 se 3650 din ke beech";
+    const m = Number(maxDevices);
+    if (!Number.isInteger(m) || m < 1 || m > 20) return "Max devices 1 se 20 ke beech";
+    return null;
+  })();
 
   const save = useMutation({
     mutationFn: async () => {
@@ -82,7 +95,10 @@ function PlanFormDialog({
       queryClient.invalidateQueries({ queryKey: ["admin-stats"] });
       onClose();
     },
-    onError: (error: Error) => toast.error(error.message),
+    onError: (error: Error) => {
+      setFormError(error.message);
+      toast.error(error.message);
+    },
   });
 
   const meta = metaQuery.data;
@@ -159,9 +175,20 @@ function PlanFormDialog({
           </div>
         </div>
       </div>
+      {formError && <p className="text-xs text-red-400">{formError}</p>}
       <DialogFooter>
         <Button variant="ghost" onClick={onClose}>Cancel</Button>
-        <Button onClick={() => save.mutate()} disabled={save.isPending}>
+        <Button
+          onClick={() => {
+            if (validationError) {
+              setFormError(validationError);
+              return;
+            }
+            setFormError(null);
+            save.mutate();
+          }}
+          disabled={save.isPending}
+        >
           {save.isPending ? "Saving…" : plan ? "Save" : "Create Plan"}
         </Button>
       </DialogFooter>
@@ -222,18 +249,15 @@ export function PlansSection() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {plansQuery.isLoading && (
-              <TableRow>
-                <TableCell colSpan={8} className="py-10 text-center text-zinc-500">Load ho raha hai…</TableCell>
-              </TableRow>
-            )}
-            {!plansQuery.isLoading && items.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={8} className="py-10 text-center text-zinc-500">
-                  Koi plan nahi — pehla plan banao.
-                </TableCell>
-              </TableRow>
-            )}
+            <TableState
+              colSpan={8}
+              isLoading={plansQuery.isLoading}
+              isError={plansQuery.isError}
+              error={plansQuery.error}
+              onRetry={() => plansQuery.refetch()}
+              isEmpty={items.length === 0}
+              empty="Koi plan nahi — pehla plan banao."
+            />
             {items.map((plan) => (
               <TableRow key={plan.id} className="border-zinc-800">
                 <TableCell>
@@ -276,16 +300,14 @@ export function PlansSection() {
                     <Button size="sm" variant="ghost" title="Edit" onClick={() => { setEditing(plan); setFormOpen(true); }}>
                       <Pencil className="h-4 w-4" />
                     </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      title="Delete"
-                      onClick={() => {
-                        if (confirm(`${plan.name} delete karein?`)) del.mutate(plan.id);
-                      }}
+                    <ConfirmButton
+                      titleAttr="Delete"
+                      title={`Delete the plan “${plan.name}”?`}
+                      description="Customers on this plan lose access when it is removed. Move them to another plan first if you can."
+                      onConfirm={() => del.mutate(plan.id)}
                     >
                       <Trash2 className="h-4 w-4 text-red-400" />
-                    </Button>
+                    </ConfirmButton>
                   </div>
                 </TableCell>
               </TableRow>

@@ -46,7 +46,7 @@ import {
   type ChannelSource,
   type FailoverChannel,
 } from "@/lib/admin-api";
-import { fmtNumber } from "./shared";
+import { fmtNumber, TableState } from "./shared";
 
 const FILTERS = [
   { key: "all", label: "All" },
@@ -148,18 +148,16 @@ export function SourcesSection() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {listQuery.isLoading ? (
-              <TableRow>
-                <TableCell colSpan={5} className="py-10 text-center text-zinc-500">
-                  <Loader2 className="mx-auto h-5 w-5 animate-spin" />
-                </TableCell>
-              </TableRow>
-            ) : items.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={5} className="py-10 text-center text-zinc-500">
-                  Koi channel nahi mila.
-                </TableCell>
-              </TableRow>
+            {listQuery.isLoading || listQuery.isError || items.length === 0 ? (
+              <TableState
+                colSpan={5}
+                isLoading={listQuery.isLoading}
+                isError={listQuery.isError}
+                error={listQuery.error}
+                onRetry={() => listQuery.refetch()}
+                isEmpty={items.length === 0}
+                empty="Koi channel nahi mila — search ya filter badal ke dekho."
+              />
             ) : (
               items.map((c) => {
                 const h = HEALTH_META[c.health];
@@ -321,8 +319,18 @@ function ManageDialog({ channel, onClose }: { channel: FailoverChannel; onClose:
             <div className="py-8 text-center text-zinc-500">
               <Loader2 className="mx-auto h-5 w-5 animate-spin" />
             </div>
+          ) : sourcesQuery.isError ? (
+            <div className="py-8 text-center">
+              <p className="text-sm font-medium text-red-400">Sources load nahi hue</p>
+              <p className="mt-1 text-xs text-zinc-500">
+                {sourcesQuery.error instanceof Error ? sourcesQuery.error.message : "Connection check karo."}
+              </p>
+              <Button size="sm" variant="outline" className="mt-3" onClick={() => sourcesQuery.refetch()}>
+                Dobara try karo
+              </Button>
+            </div>
           ) : sources.length === 0 ? (
-            <div className="py-8 text-center text-zinc-500">Koi source nahi.</div>
+            <div className="py-8 text-center text-zinc-500">Is channel ka koi source nahi.</div>
           ) : (
             sources.map((s, idx) => {
               const disabled = s.status === "DISABLED";

@@ -21,13 +21,19 @@ export class ApiError extends Error {
 }
 
 /**
- * Stream URLs now arrive from the API already pointing at the signed
- * same-origin `/api/proxy` path (Referer/UA/CORS + HMAC handled server-side).
- * This is just a defensive passthrough for any legacy raw URL.
+ * Stream URLs arrive from the API already pointing at the signed same-origin `/api/proxy` path
+ * (Referer/UA/CORS + HMAC handled server-side). This is a defensive passthrough for a raw URL.
+ *
+ * The old fallback built `/api/proxy?url=…` by hand — but `/api/proxy` requires an HMAC
+ * signature, so that "fallback" was a guaranteed 403 (and the player showed a source error for
+ * every channel whose stream record lacked a signed path). Returning the raw URL lets the player
+ * try it directly (many CDNs allow it), and it is *never worse* than a link that always fails.
  */
 export function toPlayableUrl(url: string): string {
   if (url.startsWith("/api/proxy")) return url;
-  return `/api/proxy?url=${encodeURIComponent(url)}`;
+  // A same-origin relative path is already playable as-is.
+  if (url.startsWith("/")) return url;
+  return url;
 }
 
 function buildListQuery(params: ChannelListParams): string {

@@ -1,5 +1,6 @@
 import { clientIp, rateLimit, toErrorResponse } from '@/lib/server/auth'
 import { absolutize, buildPlaylist, verifyPlaylistToken } from '@/lib/server/playlist'
+import { publicOrigin } from '@/lib/server/tenant'
 
 export const dynamic = 'force-dynamic'
 
@@ -37,7 +38,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ slug
     const built = await buildPlaylist(customerId)
     if (!built) return m3u('#EXTM3U\n# playlist not available\n', 404)
 
-    const origin = new URL(request.url).origin
+    // Never trust `request.url`: behind a proxy/CDN the Node process sees its internal origin, so
+    // the playlist was full of http://localhost:3000 links that no TV could play.
+    const origin = publicOrigin(request)
     return new Response(absolutize(built.content, origin), {
       headers: {
         'content-type': 'audio/x-mpegurl; charset=utf-8',

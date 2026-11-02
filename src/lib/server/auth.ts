@@ -48,7 +48,15 @@ export function sessionCookie(name: string, token: string, expiresAt: Date): str
 }
 
 export function clearSessionCookie(name: string): string {
-  return `${name}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`
+  // Mirror the flags used when setting it, otherwise some browsers keep the old cookie around.
+  return `${name}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT${
+    process.env.NODE_ENV === 'production' ? '; Secure' : ''
+  }`
+}
+
+/** Raw cookie value (used by flows that need the token itself, e.g. password change). */
+export function readCookieToken(request: Request, name: string): string | null {
+  return readCookie(request, name)
 }
 
 function readCookie(request: Request, name: string): string | null {
@@ -63,6 +71,11 @@ function readCookie(request: Request, name: string): string | null {
 
 export function tokenFingerprint(token: string): string {
   return createHash('sha256').update(token).digest('hex')
+}
+
+/** True when Prisma rejected a write because of a unique constraint (P2002). */
+export function isUniqueViolation(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { code?: string }).code === 'P2002'
 }
 
 /**

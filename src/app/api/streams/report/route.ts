@@ -37,7 +37,14 @@ export async function POST(request: Request): Promise<Response> {
 
     const stream = await db.stream.findUnique({
       where: { id: streamId },
-      select: { id: true, channelId: true, status: true, failureCount: true, channel: { select: { id: true, isDemo: true, organizationId: true } } },
+      select: {
+        id: true,
+        channelId: true,
+        status: true,
+        disabledBy: true,
+        failureCount: true,
+        channel: { select: { id: true, isDemo: true, organizationId: true } },
+      },
     })
     // Silently accept unknown/foreign streams — never leak which ids exist.
     if (!stream || stream.channel.organizationId !== organizationId) return Response.json({ ok: true })
@@ -53,14 +60,23 @@ export async function POST(request: Request): Promise<Response> {
     }
 
     if (body.ok) {
-      // success resets the streak and recovers a stream that had been disabled
+      // Success resets the failure streak and recovers an *auto*-disabled source.
+      // An operator-disabled source stays disabled: the player only needs to know it played, and a
+      // deliberate "turn this off" decision must not be undone by client traffic (BUG-07).
+      const operatorDisabled = stream.status === 'DISABLED' && stream.disabledBy === 'OPERATOR'
       await db.stream.update({
         where: { id: streamId },
-        data: { failureCount: 0, lastOkAt: new Date(), status: 'ACTIVE', lastError: null },
+        data: {
+          failureCount: 0,
+          lastOkAt: new Date(),
+          ...(operatorDisabled ? {} : { status: 'ACTIVE', lastError: null }),
+        },
       })
-      // A working source means the channel is healthy again → un-hide it if the doctor hid it.
-      void refreshChannelHealth([stream.channelId]).catch(() => {})
-      return Response.json({ ok: true, status: 'ACTIVE' })
+      if (!operatorDisabled) {
+        // A working source means the channel is healthy again → un-hide it if the doctor hid it.
+        void refreshChannelHealth([stream.channelId]).catch(() => {})
+      }
+      return Response.json({ ok: true, status: operatorDisabled ? 'DISABLED' : 'ACTIVE' })
     }
 
     const nextCount = stream.failureCount + 1
@@ -72,7 +88,8 @@ export async function POST(request: Request): Promise<Response> {
         lastFailureAt: new Date(),
         lastProbeAt: new Date(),
         lastError: body.error?.slice(0, 300) ?? null,
-        ...(disable ? { status: 'DISABLED' } : {}),
+        // Automatic disable — recoverable by a later passing probe / client report.
+        ...(disable ? { status: 'DISABLED', disabledBy: 'AUTO' } : {}),
       },
     })
 
