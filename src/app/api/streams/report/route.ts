@@ -25,7 +25,10 @@ export async function POST(request: Request): Promise<Response> {
     } catch {
       return Response.json({ error: 'Invalid request body' }, { status: 400 })
     }
-    const streamId = body.streamId?.trim()
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return Response.json({ error: 'Invalid request body' }, { status: 400 })
+    }
+    const streamId = typeof body?.streamId === 'string' ? body.streamId.trim() : ''
     if (!streamId || typeof body.ok !== 'boolean') {
       return Response.json({ error: 'streamId and ok are required' }, { status: 400 })
     }
@@ -50,8 +53,8 @@ export async function POST(request: Request): Promise<Response> {
     if (!stream || stream.channel.organizationId !== organizationId) return Response.json({ ok: true })
 
     // Authorization: demo channels are open; everything else must be in the caller's plan.
+    const identity = await getCustomer(request)
     if (!stream.channel.isDemo) {
-      const identity = await getCustomer(request)
       if (!identity) return Response.json({ ok: true })
       const { where, state } = await buildCustomerChannelWhere(identity.id)
       if (!state.hasAccess) return Response.json({ ok: true })
@@ -79,6 +82,14 @@ export async function POST(request: Request): Promise<Response> {
       return Response.json({ ok: true, status: operatorDisabled ? 'DISABLED' : 'ACTIVE' })
     }
 
+    // An anonymous failure report (demo channels only) must not count toward auto-disable —
+    // otherwise anyone could take the public showcase offline by replaying `ok:false`. Ask the
+    // health doctor to re-probe instead (debounced); a real server-side failure still disables.
+    if (!identity) {
+      scheduleChannelRecheck(stream.channelId)
+      return Response.json({ ok: true })
+    }
+
     const nextCount = stream.failureCount + 1
     const disable = nextCount >= FAILURE_THRESHOLD
     await db.stream.update({
@@ -87,7 +98,7 @@ export async function POST(request: Request): Promise<Response> {
         failureCount: nextCount,
         lastFailureAt: new Date(),
         lastProbeAt: new Date(),
-        lastError: body.error?.slice(0, 300) ?? null,
+        lastError: typeof body.error === 'string' ? body.error.slice(0, 300) : null,
         // Automatic disable — recoverable by a later passing probe / client report.
         ...(disable ? { status: 'DISABLED', disabledBy: 'AUTO' } : {}),
       },

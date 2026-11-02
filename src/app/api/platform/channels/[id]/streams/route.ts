@@ -16,6 +16,9 @@ export const POST = platformRouteCtx<{ id: string }>(async (request, { params },
   } catch {
     return Response.json({ error: 'Invalid request body' }, { status: 400 })
   }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return Response.json({ error: 'Invalid request body' }, { status: 400 })
+  }
 
   const url = body.url?.trim()
   try {

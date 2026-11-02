@@ -32,6 +32,7 @@ export async function POST(request: Request) {
     } catch {
       throw new HttpError(400, 'Invalid request body')
     }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) throw new HttpError(400, 'Invalid request body')
 
     const orgName = body.orgName?.trim()
     const slug = body.slug?.trim().toLowerCase()

@@ -31,7 +31,14 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const { id } = await params
     const { id: organizationId } = await resolveActiveTenant(request)
     const channel = await db.channel.findFirst({
-      where: { id, organizationId },
+      where: {
+        id,
+        organizationId,
+        isActive: true,
+        // Demo channels skip the plan check below, so they must pass the same visibility rules
+        // as /api/demo/channels here: not adult, and from a portal that is still valid.
+        OR: [{ isDemo: false }, { isDemo: true, isNsfw: false, AND: [portalValidityClause()] }],
+      },
       include: { streams: { select: STREAM_SELECT } },
     })
 

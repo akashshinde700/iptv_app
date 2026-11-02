@@ -29,9 +29,11 @@ export async function POST(request: Request) {
     const session = await db.adminSession.findUnique({
       // The DB stores only the sha256 fingerprint of the cookie value, never the raw token.
       where: { token: tokenFingerprint(token) },
-      include: { admin: { select: { id: true, username: true, passwordHash: true, organizationId: true } } },
+      include: { admin: { select: { id: true, username: true, passwordHash: true, organizationId: true, isActive: true } } },
     })
-    if (!session || session.expiresAt < new Date()) throw new HttpError(401, 'Session expired — sign in again')
+    if (!session || session.expiresAt < new Date() || !session.admin.isActive) {
+      throw new HttpError(401, 'Session expired — sign in again')
+    }
 
     let body: { currentPassword?: string; newPassword?: string }
     try {
@@ -39,6 +41,7 @@ export async function POST(request: Request) {
     } catch {
       throw new HttpError(400, 'Invalid request body')
     }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) throw new HttpError(400, 'Invalid request body')
 
     const currentPassword = body.currentPassword ?? ''
     const newPassword = body.newPassword ?? ''

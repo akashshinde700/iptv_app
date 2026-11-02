@@ -3,6 +3,7 @@
 
 import { detectAdult, detectCategory, detectQuality, type ParsedChannel } from './m3u'
 import { fetchPlaylist, parseM3U } from './m3u'
+import { guardedFetch } from '@/lib/server/net-guard'
 
 export interface XtreamAccountInfo {
   username: string
@@ -28,7 +29,7 @@ export async function fetchXtreamAccount(
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
     const api = `${normalizeServer(serverUrl)}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`
-    const response = await fetch(api, { signal: controller.signal })
+    const response = await guardedFetch(api, { signal: controller.signal })
     if (!response.ok) return null
     const json = (await response.json()) as {
       user_info?: {
@@ -82,7 +83,7 @@ async function fetchJson<T>(url: string, timeoutMs = 45_000): Promise<T | null> 
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
-    const response = await fetch(url, { signal: controller.signal })
+    const response = await guardedFetch(url, { signal: controller.signal })
     if (!response.ok) return null
     return (await response.json()) as T
   } catch {

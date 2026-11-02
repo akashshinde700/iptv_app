@@ -1,5 +1,6 @@
 import { getCustomer, toErrorResponse } from '@/lib/server/auth'
 import { playlistPath } from '@/lib/server/playlist'
+import { publicOrigin } from '@/lib/server/tenant'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,7 +14,8 @@ export async function GET(request: Request) {
     if (!identity) {
       return Response.json({ error: 'Plan required', accessDenied: true, reason: 'guest' }, { status: 403 })
     }
-    const origin = new URL(request.url).origin
+    // Behind the reverse proxy request.url is the internal origin (http://localhost:3333).
+    const origin = publicOrigin(request)
     const path = playlistPath(identity.id)
     return Response.json(
       {

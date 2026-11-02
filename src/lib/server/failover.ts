@@ -2,6 +2,8 @@ import { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
 import { FAILURE_THRESHOLD, channelIdentityKey, pickRepresentative } from '@/lib/server/iptv'
 import { signedProxyPath } from '@/lib/server/proxy-sign'
+import { guardedFetch, isPublicHttpUrl } from '@/lib/server/net-guard'
+import { HttpError } from '@/lib/server/auth'
 
 /**
  * Shared multi-source failover logic used by BOTH the single-operator admin console
@@ -235,22 +237,6 @@ const PROBE_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
 const PROBE_TIMEOUT_MS = 12_000
 
-function isPrivate(hostname: string): boolean {
-  const h = hostname.toLowerCase().replace(/^\[|\]$/g, '')
-  if (!h || h === 'localhost' || h === '0.0.0.0' || h === '::1') return true
-  if (h.endsWith('.local') || h.endsWith('.internal')) return true
-  const m = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
-  if (m) {
-    const [a, b] = [Number(m[1]), Number(m[2])]
-    if (a === 0 || a === 10 || a === 127) return true
-    if (a === 169 && b === 254) return true
-    if (a === 172 && b >= 16 && b <= 31) return true
-    if (a === 192 && b === 168) return true
-    if (a === 100 && b >= 64 && b <= 127) return true
-  }
-  return false
-}
-
 export interface ProbeResult { ok: boolean; detail: string; status: string; failureCount: number }
 
 /** Live-probe one source and record the result (org-scoped). Returns null if not found. */
@@ -269,15 +255,14 @@ export async function probeStream(
   let detail = ''
   try {
     const u = new URL(stream.url)
-    if ((u.protocol !== 'http:' && u.protocol !== 'https:') || isPrivate(u.hostname)) {
+    if (!isPublicHttpUrl(u.href)) {
       detail = 'blocked-host'
     } else {
       const controller = new AbortController()
       const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS)
       try {
-        const res = await fetch(stream.url, {
+        const res = await guardedFetch(stream.url, {
           method: 'GET',
-          redirect: 'follow',
           signal: controller.signal,
           headers: {
             'user-agent': stream.userAgent || PROBE_UA,
@@ -299,7 +284,8 @@ export async function probeStream(
     }
   } catch (err) {
     ok = false
-    detail = err instanceof Error && err.name === 'AbortError' ? 'timeout' : 'unreachable'
+    detail =
+      err instanceof HttpError ? 'blocked-host' : err instanceof Error && err.name === 'AbortError' ? 'timeout' : 'unreachable'
   }
 
   let status = stream.status

@@ -11,7 +11,7 @@
 import { db } from '@/lib/db'
 import { audit, HttpError, type AdminIdentity } from '@/lib/server/auth'
 import { decryptSecret, encryptSecret } from '@/lib/server/crypto'
-import { assertPublicSourceUrl } from '@/lib/server/net-guard'
+import { assertPublicSourceUrl, guardedFetch } from '@/lib/server/net-guard'
 import { fetchPlaylist, parseM3U } from '@/lib/server/sync/m3u'
 import { fetchXtreamAccount, fetchXtreamVodCounts, xtreamPlaylistUrl } from '@/lib/server/sync/xtream'
 import { stalkerHandshake } from '@/lib/server/sync/stalker'
@@ -133,7 +133,7 @@ export async function testConnection(cfg: DraftConfig): Promise<TestResult> {
           const api = `${cfg.url!.replace(/\/+$/, '')}/player_api.php?username=${encodeURIComponent(cfg.username!)}&password=${encodeURIComponent(cfg.password!)}&action=get_live_streams`
           const controller = new AbortController()
           const timer = setTimeout(() => controller.abort(), 30_000)
-          const res = await fetch(api, { signal: controller.signal }).finally(() => clearTimeout(timer))
+          const res = await guardedFetch(api, { signal: controller.signal }).finally(() => clearTimeout(timer))
           if (res.ok) {
             const list = (await res.json()) as unknown[]
             if (Array.isArray(list)) estimate = list.length
@@ -169,7 +169,7 @@ export async function testConnection(cfg: DraftConfig): Promise<TestResult> {
         const controller = new AbortController()
         const timer = setTimeout(() => controller.abort(), 30_000)
         try {
-          const res = await fetch(cfg.url!, { signal: controller.signal, headers: { 'User-Agent': 'VLC/3.0.20 LibVLC/3.0.20' }, redirect: 'follow' })
+          const res = await guardedFetch(cfg.url!, { signal: controller.signal, headers: { 'User-Agent': 'VLC/3.0.20 LibVLC/3.0.20' } })
           if (!res.ok) return { ...base, message: `The URL returned HTTP ${res.status}.` }
           const text = await res.text()
           if (!/#EXTM3U/i.test(text.slice(0, 500))) return { ...base, message: 'This URL did not return a valid M3U playlist.' }

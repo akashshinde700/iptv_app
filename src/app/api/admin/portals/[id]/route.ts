@@ -1,6 +1,7 @@
 import { db } from '@/lib/db'
 import { adminRouteCtx, audit } from '@/lib/server/auth'
 import { encryptSecret } from '@/lib/server/crypto'
+import { assertPublicSourceUrl } from '@/lib/server/net-guard'
 
 export const dynamic = 'force-dynamic'
 
@@ -26,6 +27,12 @@ export const PATCH = adminRouteCtx(async (request, { params }, admin) => {
   } catch {
     return Response.json({ error: 'Invalid request body' }, { status: 400 })
   }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return Response.json({ error: 'Invalid request body' }, { status: 400 })
+  }
+
+  if (typeof body.url === 'string' && body.url.trim()) assertPublicSourceUrl(body.url, 'Portal URL')
+  if (typeof body.epgUrl === 'string' && body.epgUrl.trim()) assertPublicSourceUrl(body.epgUrl, 'EPG URL')
 
   const data: Record<string, unknown> = {}
   if (body.name !== undefined) data.name = body.name.trim()

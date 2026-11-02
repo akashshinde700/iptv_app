@@ -23,7 +23,7 @@
  */
 import { db } from '@/lib/db'
 import { FAILURE_THRESHOLD } from '@/lib/server/iptv'
-import { isPublicHttpUrl, resolvedPublicUrl } from '@/lib/server/net-guard'
+import { guardedFetch, isPublicHttpUrl, resolvedPublicUrl } from '@/lib/server/net-guard'
 
 /** How a single probe finished. */
 export interface ProbeOutcome {
@@ -75,7 +75,7 @@ export async function probeStreamUrl(target: ProbeTarget): Promise<ProbeOutcome>
     const looksHls = /\.m3u8?(?:$|\?)/i.test(target.url)
 
     if (looksHls) {
-      const res = await fetch(target.url, { headers: { ...headers, range: 'bytes=0-262143' }, redirect: 'follow', signal: controller.signal })
+      const res = await guardedFetch(target.url, { headers: { ...headers, range: 'bytes=0-262143' }, signal: controller.signal })
       if (!res.ok && res.status !== 206) return { ok: false, detail: `HTTP ${res.status}`, latencyMs: Date.now() - startedAt }
       const body = (await res.text()).slice(0, MAX_MANIFEST_BYTES)
       const latencyMs = Date.now() - startedAt
@@ -86,7 +86,7 @@ export async function probeStreamUrl(target: ProbeTarget): Promise<ProbeOutcome>
     }
 
     // Progressive (ts / mp4 / mkv): a small ranged GET is enough to prove the host serves data.
-    const res = await fetch(target.url, { headers: { ...headers, range: 'bytes=0-4096' }, redirect: 'follow', signal: controller.signal })
+    const res = await guardedFetch(target.url, { headers: { ...headers, range: 'bytes=0-4096' }, signal: controller.signal })
     if (!res.ok && res.status !== 206) return { ok: false, detail: `HTTP ${res.status}`, latencyMs: Date.now() - startedAt }
     const contentType = res.headers.get('content-type') ?? ''
     if (/text\/html/i.test(contentType)) {

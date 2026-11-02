@@ -17,6 +17,7 @@ export const POST = adminRouteCtx(async (request, _ctx, admin) => {
   } catch {
     /* empty body is fine */
   }
+  if (!body || typeof body !== 'object') body = {}
 
   const summary = await runHealthSweep(
     { organizationId: admin.organizationId },

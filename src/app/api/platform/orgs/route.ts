@@ -57,6 +57,7 @@ export const POST = platformRoute(async (request, admin) => {
   } catch {
     throw new HttpError(400, 'Invalid request body')
   }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new HttpError(400, 'Invalid request body')
 
   const name = body.name?.trim()
   const slug = body.slug?.trim().toLowerCase()

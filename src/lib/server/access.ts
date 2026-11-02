@@ -79,9 +79,12 @@ export async function evaluateAccess(customerId: string | null): Promise<AccessS
     include: {
       plan: { include: { planChannels: { select: { channelId: true } } } },
       overrides: { select: { channelId: true, allow: true } },
+      organization: { select: { status: true } },
     },
   })
   if (!customer) return denied('Customer not found')
+  // A suspended operator's storefront is off — existing sessions and playlist tokens included.
+  if (customer.organization?.status === 'SUSPENDED') return denied('Service unavailable', customer.organizationId)
 
   const status = await syncCustomerStatus(customer.id, customer.status, customer.planExpiresAt)
   if (status !== 'ACTIVE') return denied(`Customer ${status.toLowerCase()}`, customer.organizationId)

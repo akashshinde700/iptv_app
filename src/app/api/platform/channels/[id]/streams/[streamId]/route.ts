@@ -19,6 +19,9 @@ export const PATCH = platformRouteCtx<{ id: string; streamId: string }>(async (r
   } catch {
     return Response.json({ error: 'Invalid request body' }, { status: 400 })
   }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return Response.json({ error: 'Invalid request body' }, { status: 400 })
+  }
 
   const data: Record<string, unknown> = {}
   if (body.priority !== undefined) {

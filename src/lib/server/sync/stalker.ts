@@ -12,6 +12,7 @@
 
 import { createHash } from 'node:crypto'
 import type { ParsedChannel } from './m3u'
+import { guardedFetch } from '@/lib/server/net-guard'
 
 export interface StalkerDevice {
   deviceId?: string | null
@@ -135,10 +136,9 @@ async function stalkerGet<T>(
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
     const url = `${apiBase}?${params}`
-    const response = await fetch(url, {
+    const response = await guardedFetch(url, {
       headers: stalkerHeaders(mac, token),
       signal: controller.signal,
-      redirect: 'follow',
     })
     if (!response.ok) {
       throw new Error(`Stalker API HTTP ${response.status}`)

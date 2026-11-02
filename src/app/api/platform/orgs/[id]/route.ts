@@ -46,6 +46,7 @@ export const PATCH = platformRouteCtx(async (request, { params }, admin) => {
   } catch {
     throw new HttpError(400, 'Invalid request body')
   }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new HttpError(400, 'Invalid request body')
 
   const data: Record<string, unknown> = {}
   if (body.name !== undefined) data.name = body.name.trim()

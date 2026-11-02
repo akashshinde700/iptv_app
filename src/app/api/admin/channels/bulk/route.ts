@@ -11,6 +11,9 @@ export const POST = adminRoute(async (request, admin) => {
   } catch {
     return Response.json({ error: 'Invalid request body' }, { status: 400 })
   }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return Response.json({ error: 'Invalid request body' }, { status: 400 })
+  }
 
   // BUG-12: the id list came straight from the client with no bound. A huge array meant one
   // request could push a multi-megabyte `IN (…)` clause into MySQL (and a giant AuditLog row).

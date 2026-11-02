@@ -18,6 +18,9 @@ export async function POST(request: Request) {
     } catch {
       return Response.json({ error: 'Invalid request body' }, { status: 400 })
     }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return Response.json({ error: 'Invalid request body' }, { status: 400 })
+    }
 
     const username = body.username?.trim().toLowerCase()
     const password = body.password ?? ''

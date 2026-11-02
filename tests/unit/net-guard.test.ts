@@ -74,6 +74,25 @@ describe('isPrivateAddress', () => {
     }
   })
 
+  it('decodes IPv4 embedded in IPv6 (hex-normalised mapped, compatible, NAT64, 6to4, Teredo)', () => {
+    for (const ip of [
+      '::ffff:a9fe:a9fe', // what new URL() turns [::ffff:169.254.169.254] into
+      '::ffff:7f00:1',
+      '0:0:0:0:0:ffff:7f00:0001',
+      '::7f00:1', // IPv4-compatible 127.0.0.1
+      '::a9fe:a9fe',
+      '64:ff9b::a9fe:a9fe', // NAT64 → 169.254.169.254
+      '2002:7f00:0001::1', // 6to4 → 127.0.0.1
+      '2001:0:4136:e378:8000:63bf:3fff:fdd2', // Teredo
+      'fe80::1%eth0',
+      'fec0::1',
+    ]) {
+      expect(isPrivateAddress(ip), ip).toBe(true)
+    }
+    expect(isPrivateAddress('::ffff:808:808')).toBe(false) // 8.8.8.8
+    expect(isPrivateAddress('2002:808:808::1')).toBe(false)
+  })
+
   it('treats malformed input as private (fail closed)', () => {
     expect(isPrivateAddress('not-an-ip')).toBe(true)
     expect(isPrivateAddress('999.1.1.1')).toBe(true)
@@ -92,6 +111,8 @@ describe('isPublicHttpUrl (layer 1)', () => {
       'http://metadata.google.internal/',
       'http://2130706433/', // decimal 127.0.0.1
       'http://0x7f000001/', // hex 127.0.0.1
+      'http://[::ffff:169.254.169.254]/latest/meta-data/',
+      'http://[::ffff:127.0.0.1]:3000/',
       'file:///etc/passwd',
       'ftp://example.com/x',
     ]) {

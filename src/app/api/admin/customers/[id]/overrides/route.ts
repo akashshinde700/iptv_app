@@ -13,6 +13,9 @@ export const POST = adminRouteCtx(async (request, { params }, admin) => {
   } catch {
     return Response.json({ error: 'Invalid request body' }, { status: 400 })
   }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return Response.json({ error: 'Invalid request body' }, { status: 400 })
+  }
   if (!body.channelId) return Response.json({ error: 'channelId zaroori hai' }, { status: 400 })
 
   // Both customer and channel must belong to this admin's organization.

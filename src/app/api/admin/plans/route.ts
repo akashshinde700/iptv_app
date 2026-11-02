@@ -45,6 +45,9 @@ export const POST = adminRoute(async (request, admin) => {
   } catch {
     return Response.json({ error: 'Invalid request body' }, { status: 400 })
   }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return Response.json({ error: 'Invalid request body' }, { status: 400 })
+  }
 
   const name = body.name?.trim()
   if (!name) return Response.json({ error: 'Plan name zaroori hai' }, { status: 400 })

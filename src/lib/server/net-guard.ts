@@ -17,6 +17,7 @@
  * hot path and segment requests repeat the same handful of hosts.
  */
 import { lookup } from 'node:dns/promises'
+import { isIP } from 'node:net'
 import { HttpError } from '@/lib/server/auth'
 
 /* ------------------------------ address checks ----------------------------- */
@@ -25,16 +26,7 @@ import { HttpError } from '@/lib/server/auth'
 export function isPrivateAddress(address: string): boolean {
   const ip = address.toLowerCase().replace(/^\[|\]$/g, '').trim()
 
-  if (ip.includes(':')) {
-    // IPv6
-    if (ip === '::' || ip === '::1') return true
-    if (ip.startsWith('fe8') || ip.startsWith('fe9') || ip.startsWith('fea') || ip.startsWith('feb')) return true // fe80::/10
-    if (ip.startsWith('fc') || ip.startsWith('fd')) return true // unique local fc00::/7
-    if (ip.startsWith('ff')) return true // multicast
-    const mapped = ip.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/)
-    if (mapped) return isPrivateAddress(mapped[1])
-    return false
-  }
+  if (ip.includes(':')) return isPrivateV6(ip)
 
   const parts = ip.split('.')
   if (parts.length !== 4) return true
@@ -51,6 +43,57 @@ function isPrivateV4([a, b]: number[]): boolean {
   if (a === 100 && b >= 64 && b <= 127) return true // CGNAT
   if (a === 192 && b === 0) return true // 192.0.0.0/24, 192.0.2.0/24
   if (a >= 224) return true // multicast / reserved
+  return false
+}
+
+/**
+ * Expand an IPv6 literal into its 8 16-bit groups, or null if it is not valid IPv6.
+ * Handles `::` compression and a dotted IPv4 tail (`::ffff:1.2.3.4`). Node's URL parser
+ * normalises `[::ffff:169.254.169.254]` to `[::ffff:a9fe:a9fe]`, so the embedded IPv4 has to be
+ * recovered from the hex groups — matching on the dotted form alone is bypassable.
+ */
+function expandIPv6(raw: string): number[] | null {
+  let ip = raw.split('%')[0] // drop a zone id (fe80::1%eth0)
+  if (isIP(ip) !== 6) return null
+
+  const dotted = ip.match(/(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
+  if (dotted) {
+    const [a, b, c, d] = dotted.slice(1).map(Number)
+    ip = ip.slice(0, -dotted[0].length) + `${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`
+  }
+
+  const [head, tail] = ip.includes('::') ? ip.split('::') : [ip, undefined]
+  const headGroups = head ? head.split(':') : []
+  const tailGroups = tail ? tail.split(':') : []
+  const fill = tail === undefined ? 0 : 8 - headGroups.length - tailGroups.length
+  const groups = [...headGroups, ...Array(fill).fill('0'), ...tailGroups].map((g) => Number.parseInt(g, 16))
+  return groups.length === 8 && groups.every((g) => Number.isInteger(g) && g >= 0 && g <= 0xffff) ? groups : null
+}
+
+function v4FromGroups(hi: number, lo: number): string {
+  return [hi >>> 8, hi & 255, lo >>> 8, lo & 255].join('.')
+}
+
+function isPrivateV6(address: string): boolean {
+  const g = expandIPv6(address)
+  if (!g) return true // unparseable: fail closed
+
+  const zeroUpTo = (n: number) => g.slice(0, n).every((x) => x === 0)
+  if (zeroUpTo(8)) return true // ::
+  if (zeroUpTo(7) && g[7] === 1) return true // ::1
+  if (zeroUpTo(5) && g[5] === 0xffff) return isPrivateAddress(v4FromGroups(g[6], g[7])) // ::ffff:0:0/96 mapped
+  if (zeroUpTo(6)) return isPrivateAddress(v4FromGroups(g[6], g[7])) // ::/96 IPv4-compatible
+  if (g[0] === 0x64 && g[1] === 0xff9b && g.slice(2, 6).every((x) => x === 0)) {
+    return isPrivateAddress(v4FromGroups(g[6], g[7])) // 64:ff9b::/96 NAT64
+  }
+  if (g[0] === 0x2002) return isPrivateAddress(v4FromGroups(g[1], g[2])) // 2002::/16 6to4
+  if (g[0] === 0x2001 && g[1] === 0) return true // 2001::/32 Teredo (embeds an obfuscated IPv4)
+  if (g[0] === 0x2001 && g[1] === 0xdb8) return true // documentation
+  if (g[0] === 0x100 && zeroUpTo(4)) return true // 100::/64 discard
+  if ((g[0] & 0xffc0) === 0xfe80) return true // fe80::/10 link-local
+  if ((g[0] & 0xffc0) === 0xfec0) return true // fec0::/10 deprecated site-local
+  if ((g[0] & 0xfe00) === 0xfc00) return true // fc00::/7 unique local
+  if ((g[0] & 0xff00) === 0xff00) return true // multicast
   return false
 }
 
@@ -211,4 +254,12 @@ export async function safeFetch(
   }
 
   throw new HttpError(400, 'Too many redirects')
+}
+
+/**
+ * Drop-in `fetch` replacement for any URL an operator or upstream controls (portals, M3U, EPG,
+ * probes). Same per-hop checks as `safeFetch`; returns just the final `Response`.
+ */
+export async function guardedFetch(input: string | URL, init: RequestInit = {}): Promise<Response> {
+  return (await safeFetch(input, init)).response
 }

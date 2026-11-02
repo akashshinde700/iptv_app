@@ -1,4 +1,5 @@
 /* M3U / m3u_plus playlist parser with metadata extraction. */
+import { guardedFetch } from '@/lib/server/net-guard'
 
 export interface ParsedChannel {
   name: string
@@ -189,10 +190,9 @@ export async function fetchPlaylist(url: string, timeoutMs = 60_000): Promise<st
   try {
     let response: Response
     try {
-      response = await fetch(url, {
+      response = await guardedFetch(url, {
         signal: controller.signal,
         headers: { 'User-Agent': 'VLC/3.0.20 LibVLC/3.0.20' },
-        redirect: 'follow',
       })
     } catch (err) {
       // AbortError (our timeout) or a network failure — the source is unreachable, not us.

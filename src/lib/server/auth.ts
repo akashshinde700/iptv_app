@@ -4,6 +4,7 @@
  * - Sessions: random 48-byte tokens stored in DB, sent as httpOnly cookies.
  */
 import { randomBytes, scryptSync, timingSafeEqual, createHash } from 'node:crypto'
+import { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
 
 export const ADMIN_COOKIE = 'sk_admin_session'
@@ -183,11 +184,22 @@ export async function getAdmin(request: Request): Promise<AdminIdentity | null> 
     where: { token: tokenFingerprint(token) },
     include: {
       admin: {
-        select: { id: true, username: true, email: true, role: true, isActive: true, organizationId: true, isPlatformStaff: true },
+        select: {
+          id: true,
+          username: true,
+          email: true,
+          role: true,
+          isActive: true,
+          organizationId: true,
+          isPlatformStaff: true,
+          organization: { select: { status: true } },
+        },
       },
     },
   })
   if (!session || session.expiresAt < new Date() || !session.admin.isActive) return null
+  // Login refuses a suspended org; a session opened before the suspension must stop too.
+  if (session.admin.organization?.status === 'SUSPENDED' && !session.admin.isPlatformStaff) return null
   return {
     id: session.admin.id,
     username: session.admin.username,
@@ -247,6 +259,10 @@ export function toErrorResponse(error: unknown): Response {
     return Response.json({ error: error.message }, { status: error.status })
   }
   if (error instanceof Response) return error
+  // A field of the wrong type (e.g. `"price": "abc"` → NaN) reaching Prisma is bad input, not a crash.
+  if (error instanceof Prisma.PrismaClientValidationError) {
+    return Response.json({ error: 'Invalid request data' }, { status: 400 })
+  }
   console.error('route error:', error)
   return Response.json({ error: 'Internal server error' }, { status: 500 })
 }

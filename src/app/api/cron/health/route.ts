@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto'
 import { db } from '@/lib/db'
 import { runHealthSweep } from '@/lib/server/health-doctor'
 import { reconcileCustomerAccess } from '@/lib/server/billing'
@@ -24,7 +25,9 @@ async function handle(request: Request): Promise<Response> {
   }
   const header = request.headers.get('authorization') ?? ''
   const provided = header.replace(/^Bearer\s+/i, '') || request.headers.get('x-cron-secret') || ''
-  if (provided !== secret) {
+  const a = Buffer.from(provided)
+  const b = Buffer.from(secret)
+  if (a.length !== b.length || !timingSafeEqual(a, b)) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 })
   }
 

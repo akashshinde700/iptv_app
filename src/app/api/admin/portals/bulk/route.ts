@@ -2,6 +2,7 @@ import { db } from '@/lib/db'
 import { adminRoute, audit } from '@/lib/server/auth'
 import { keyForEntry, parseBulkText } from '@/lib/server/bulk-import'
 import { encryptSecret } from '@/lib/server/crypto'
+import { isPublicHttpUrl } from '@/lib/server/net-guard'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -18,6 +19,9 @@ export const POST = adminRoute(async (request, admin) => {
   try {
     body = await request.json()
   } catch {
+    return Response.json({ error: 'Invalid request body' }, { status: 400 })
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
     return Response.json({ error: 'Invalid request body' }, { status: 400 })
   }
 
@@ -71,7 +75,8 @@ export const POST = adminRoute(async (request, admin) => {
   }
 
   // ---- import ----
-  const fresh = parsed.entries.filter((e) => !existingKeys.has(keyForEntry(e)))
+  // Private/local hosts are never imported (SSRF) — the same rule the single-portal form enforces.
+  const fresh = parsed.entries.filter((e) => !existingKeys.has(keyForEntry(e)) && (!e.url || isPublicHttpUrl(e.url)))
   const hostCount = new Map<string, number>()
   let created = 0
 

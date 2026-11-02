@@ -22,7 +22,11 @@ export const POST = adminRouteCtx<{ id: string }>(async (request, { params }, ad
   })
   // Re-enable the sources too, otherwise `servableChannelClause` (at least one non-disabled
   // stream) would keep the channel out of the catalog and the restore would look like a no-op.
-  await db.stream.updateMany({ where: { channelId: id }, data: { failureCount: 0, status: 'ACTIVE' } })
+  // Sources the operator switched off on purpose stay off (BUG-07); only auto-disabled ones return.
+  await db.stream.updateMany({
+    where: { channelId: id, OR: [{ disabledBy: null }, { disabledBy: { not: 'OPERATOR' } }] },
+    data: { failureCount: 0, status: 'ACTIVE', disabledBy: null },
+  })
 
   await audit({
     adminId: admin.id,

@@ -1,6 +1,7 @@
 import { db } from '@/lib/db'
 import { adminRoute, audit } from '@/lib/server/auth'
 import { encryptSecret, maskSecret } from '@/lib/server/crypto'
+import { assertPublicSourceUrl } from '@/lib/server/net-guard'
 
 export const dynamic = 'force-dynamic'
 
@@ -37,6 +38,9 @@ export const POST = adminRoute(async (request, admin) => {
   } catch {
     return Response.json({ error: 'Invalid request body' }, { status: 400 })
   }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return Response.json({ error: 'Invalid request body' }, { status: 400 })
+  }
 
   const name = body.name?.trim()
   const type = body.type?.trim().toUpperCase()
@@ -49,6 +53,8 @@ export const POST = adminRoute(async (request, admin) => {
   if ((type === 'STALKER' || type === 'XTREAM' || type === 'M3U_URL') && !url) {
     return Response.json({ error: 'URL/link zaroori hai' }, { status: 400 })
   }
+  if (url) assertPublicSourceUrl(url, 'Portal URL')
+  if (body.epgUrl?.trim()) assertPublicSourceUrl(body.epgUrl, 'EPG URL')
   if (type === 'STALKER' && !/^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/.test(body.macAddress?.trim() ?? '')) {
     return Response.json({ error: 'Valid MAC address daalo (jaise 00:1A:79:XX:XX:XX)' }, { status: 400 })
   }

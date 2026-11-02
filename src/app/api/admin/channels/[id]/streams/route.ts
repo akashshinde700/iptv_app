@@ -73,6 +73,9 @@ export const POST = adminRouteCtx(async (request, { params }, admin) => {
   } catch {
     return Response.json({ error: 'Invalid request body' }, { status: 400 })
   }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return Response.json({ error: 'Invalid request body' }, { status: 400 })
+  }
 
   const url = body.url?.trim()
   try {

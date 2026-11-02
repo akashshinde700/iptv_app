@@ -14,6 +14,7 @@
  */
 import { db } from '@/lib/db'
 import { channelIdentityKey } from '@/lib/server/iptv'
+import { guardedFetch } from '@/lib/server/net-guard'
 
 const GUIDE_TTL_MS = 15 * 60 * 1000
 /** Keep a day of history + two days ahead; that's what a TV guide actually shows. */
@@ -139,7 +140,7 @@ async function loadGuide(url: string, now: number): Promise<ParsedGuide | null> 
   if (cached !== undefined && (cached === null ? false : now - cached.fetchedAt < GUIDE_TTL_MS)) return cached
 
   try {
-    const res = await fetch(url, {
+    const res = await guardedFetch(url, {
       // Some providers 403 a bare fetch; a plain UA is enough for most.
       headers: { 'user-agent': 'StreamKaro/1.0 EPG', accept: 'application/xml,text/xml,*/*' },
       cache: 'no-store',

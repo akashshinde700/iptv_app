@@ -181,3 +181,29 @@ device, no seeded data), i.e. §6 stays as it is.
   HTML-injection sink, undocumented env vars).
 * **Still unproven:** runtime behaviour — no browser, no device, no seeded database here. CI covers
   compile/type/lint/unit; it does not cover "does the player play".
+
+---
+
+## 6. Follow-up pass (same day): fresh security review + dependency cleanup
+
+Typecheck, lint, 174 unit tests and `next build` all pass locally (real generated Prisma client).
+
+| # | Finding | Severity | Fix |
+|---|---|---|---|
+| 1 | SSRF guard bypass: `new URL()` normalises `[::ffff:169.254.169.254]` to `[::ffff:a9fe:a9fe]`, which the dotted-only mapped-address check accepted → the signed proxy could fetch cloud metadata | **Critical** | `isPrivateAddress` now fully expands IPv6 and decodes embedded IPv4 (mapped, compatible, NAT64, 6to4); Teredo/doc/site-local blocked; regression tests added |
+| 2 | Tenant portal / EPG URLs never SSRF-validated; sync (M3U/Xtream/Stalker), EPG, source tests and probes used raw `fetch` with `redirect: 'follow'` | High | new `guardedFetch` (per-hop DNS + redirect re-check) on every operator-controlled fetch; portal create/update/bulk validate URL + EPG URL; failover's weaker private-host check removed |
+| 3 | `/api/channels/[id]` served deactivated, adult or expired-portal *demo* channels to guests | Medium | lookup requires `isActive`, and demo channels must be non-NSFW from a valid portal |
+| 4 | Anonymous `ok:false` reports could auto-disable public demo streams | Medium | guest failure reports only schedule a (debounced) server-side re-probe |
+| 5 | Suspending an org did not stop existing customer sessions/playlists or admin sessions | Medium | `evaluateAccess` and `getAdmin` deny when the org is `SUSPENDED` (platform staff exempt) |
+| 6 | "Restore hidden channel" re-enabled operator-disabled sources (BUG-07 regression) | Low | restore skips `disabledBy: OPERATOR` |
+| 7 | `null` / wrongly-typed JSON bodies → 500 | Low | non-object bodies → 400 in every JSON route; `PrismaClientValidationError` → 400 |
+| 8 | `/api/my/playlist` used the internal origin | Low | `publicOrigin(request)` |
+| 9 | Cron secret compared with `!==`; password change ignored `admin.isActive` | Low | `timingSafeEqual`; `isActive` checked |
+| 10 | SEC-13: 18 unused dependencies (incl. `sharp`, `@mdxeditor/editor`, `react-syntax-highlighter`, `next-auth`) carried 13 advisories | Medium | removed (351 packages); `npm audit --omit=dev` 13 → 7 |
+
+**Remaining advisories (accepted):** all 7 are in build-time CLIs — `prisma` → `@prisma/config` →
+`deepmerge-ts`, and `@capacitor/cli` → `rimraf` → `glob`/`minimatch`. No request data reaches them;
+the fixes require Prisma 7 / a Capacitor CLI downgrade.
+
+**Still open (unchanged, by design or needs product work):** device-limit check-then-create race
+(low), plus the OPEN items in `BUGS_AND_ISSUES.md`.
