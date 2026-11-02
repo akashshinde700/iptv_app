@@ -32,6 +32,8 @@ src/lib/server/media/
   types.ts      # contracts shared by every provider + id helpers (catalog:movie:<cuid>)
   catalog.ts    # DEFAULT: our own Movies/Series tables, signed play URLs
   nxsha.ts      # OPTIONAL third-party adapter (unlicensed — see §6)
+  nxsha-providers.ts  # scraper catalogue: capabilities + probe ordering
+  nxsha-embed.ts      # last-resort third-party iframe players
   fixtures.ts   # sample catalog for demos, no DB (MEDIA_FIXTURES=1)
   index.ts      # provider registry (lazy imports, env-driven)
   gate.ts       # one plan gate for all /api/media routes
@@ -131,6 +133,22 @@ Read this before you enable it:
 * some hosts fingerprint TLS and only answer `curl`, which is why the adapter shells out to
   curl with a `fetch` fallback — serverless platforms may not have curl;
 * it has no search endpoint, so search returns nothing with that provider.
+
+How a title becomes a picture, in order:
+
+1. `/api/servers` is asked which scrapers have it. Rows are ranked by the upstream
+   `high_priority`/`position` hints, then by our catalogue's taste (`nxsha-providers.ts`), and
+   **at most 4 are probed in parallel**. Offline/disabled rows and scrapers saved for the other
+   kind (`types[]`) are dropped; anime-only scrapers go last unless it is a series.
+2. If `/api/servers` returns nothing, a known-good fallback list is probed instead of giving up.
+3. Whatever answers is rewritten to an opaque signed `/api/proxy` path. Subtitle tracks
+   (`language` + `uri` upstream) are proxied the same way, because their host sends no CORS.
+4. If **every** scraper fails, the API returns sources flagged `embed: true` — six third-party
+   players keyed by TMDB id (`nxsha-embed.ts`). The UI shows them in a sandboxed iframe with a
+   plain-language notice; they never reach the video pipeline.
+
+The full upstream reference (crypto layer, endpoint shapes, scraper table) is in
+[`docs/NXSHA_PROVIDER_SPEC.md`](./NXSHA_PROVIDER_SPEC.md).
 
 The default `catalog` provider has none of these problems. If you are unsure, leave nxsha
 off — the app fully works without it.
