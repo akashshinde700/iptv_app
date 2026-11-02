@@ -44,7 +44,30 @@ const eslintConfig = [...nextCoreWebVitals, ...nextTypescript, {
     "no-useless-escape": "off",
   },
 }, {
-  ignores: ["node_modules/**", ".next/**", "out/**", "build/**", "next-env.d.ts", "examples/**", "skills"]
+  // `desktop/` is a separate Electron project (CommonJS, own package.json). Linting it with the
+  // Next.js web config failed `npm run lint` on its `require()` calls, which is why CI could never
+  // go green. It still gets the shared rules — just with CommonJS globals allowed.
+  files: ["desktop/**/*.js"],
+  languageOptions: {
+    sourceType: "commonjs",
+    globals: { require: "readonly", module: "writable", __dirname: "readonly", process: "readonly" },
+  },
+  rules: {
+    "@typescript-eslint/no-require-imports": "off",
+  },
+}, {
+  ignores: [
+    "node_modules/**",
+    ".next/**",
+    "out/**",
+    "build/**",
+    "next-env.d.ts",
+    "examples/**",
+    "skills",
+    // Generated / vendored output that is not ours to lint.
+    "android/app/src/main/assets/**",
+    "public/**",
+  ]
 }];
 
 export default eslintConfig;
