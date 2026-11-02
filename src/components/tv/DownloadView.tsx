@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Apple, Check, Download, Monitor, MonitorDown, Smartphone, Tv, MonitorSmartphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -20,16 +20,26 @@ const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
 
 export function DownloadView() {
   const navigate = useAppStore((s) => s.navigate);
-  const [canInstallPwa, setCanInstallPwa] = useState(false);
-  const [ua, setUa] = useState("");
 
-  useEffect(() => {
-    setUa(navigator.userAgent);
-    const check = () => setCanInstallPwa(!!getInstallPrompt());
-    check();
-    window.addEventListener("streamkaro:installable", check);
-    return () => window.removeEventListener("streamkaro:installable", check);
-  }, []);
+  /*
+   * The user agent and the deferred PWA install prompt are external, browser-only sources of
+   * truth. Reading them in an effect meant a `setState` on mount (an extra render pass, and a
+   * lint "cascading renders" error); `useSyncExternalStore` subscribes instead, and the server
+   * snapshot keeps hydration deterministic (empty UA → generic install hint, never `undefined`).
+   */
+  const ua = useSyncExternalStore(
+    () => () => {},
+    () => navigator.userAgent,
+    () => "",
+  );
+  const canInstallPwa = useSyncExternalStore(
+    (onChange) => {
+      window.addEventListener("streamkaro:installable", onChange);
+      return () => window.removeEventListener("streamkaro:installable", onChange);
+    },
+    () => !!getInstallPrompt(),
+    () => false,
+  );
 
   // Ask the server which artifacts actually exist. A download button that 404s is worse than
   // an honest "not uploaded yet", and this also picks up size for the label.

@@ -1,0 +1,74 @@
+name: CI
+
+# There was no CI at all: `tsc`, `eslint` and the unit suite were only ever run by hand, so a PR
+# could merge with a broken type, a lint error or a failing test and nobody would know until
+# deploy. This is deliberately boring and runs the same four commands a developer runs locally.
+#
+# Note on Prisma: the generated client is NOT committed (node_modules/.prisma is gitignored), so the
+# type check and the build both need `prisma generate` first. That step downloads engine binaries,
+# which is why it is its own step with its own timeout — and why an offline machine can neither
+# type-check nor build this repo.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Type check, lint, tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      # Only used by the build step: `next build` collects page data, and the API routes import the
+      # Prisma client at module scope. A throwaway MySQL lets that succeed without touching any real
+      # database. No test writes to it.
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: streamkaro_ci
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+    env:
+      DATABASE_URL: mysql://root:root@127.0.0.1:3306/streamkaro_ci
+      PROXY_SIGNING_SECRET: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      PORTAL_ENC_KEY: fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      # `--legacy-peer-deps` is required by this dependency tree (see README).
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps --no-audit --no-fund
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Apply schema to the throwaway database
+        run: npx prisma db push --skip-generate
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Production build
+        run: npx next build

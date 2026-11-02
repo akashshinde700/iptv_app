@@ -1,16 +1,17 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { GeistSans } from "geist/font/sans";
+import { GeistMono } from "geist/font/mono";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+/*
+ * Fonts are self-hosted (`geist` package), not fetched from Google at build time.
+ * `next/font/google` downloads the files during `next build`, so any offline build, air-gapped
+ * CI runner or restrictive firewall failed the whole build with "Failed to fetch Geist from
+ * Google Fonts" — a deploy that cannot build is worse than a slightly larger bundle. The package
+ * ships the same typeface, the same `--font-geist-*` variables and the same metrics.
+ */
+const geistSans = GeistSans;
+const geistMono = GeistMono;
 
 export const metadata: Metadata = {
   title: {

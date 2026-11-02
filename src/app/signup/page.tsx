@@ -23,9 +23,14 @@ export default function SignupPage() {
   // debounced subdomain availability check
   useEffect(() => {
     const s = slug.trim().toLowerCase();
-    if (!s) return setAvail("idle");
-    setAvail("checking");
+    // Nothing is set synchronously in the effect body: a setState there caused an extra render
+    // pass on every keystroke (and a react-hooks warning). The debounce owns the state changes.
     const t = setTimeout(async () => {
+      if (!s) {
+        setAvail("idle");
+        return;
+      }
+      setAvail("checking");
       try {
         const res = await fetch(`/api/signup/check?slug=${encodeURIComponent(s)}`);
         const data = await res.json();
