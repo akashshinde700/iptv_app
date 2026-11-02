@@ -16,8 +16,12 @@
 | Bulk import driver | `scripts/bulk-import-run.py` | `scripts/` | manual |
 | Mobile / desktop | none | — | — |
 
-There is **no CI pipeline**, no coverage gate, and no integration environment. That is the single
-biggest testing gap: every check in this audit was run by hand.
+There was **no CI pipeline** until 2026-11-02 (no coverage gate, no integration environment). Every
+check in the original audit was run by hand — which is precisely how five real type errors survived in
+`main`. CI now runs install → `prisma generate` → `db push` on a throwaway MySQL → typecheck → lint →
+tests → `next build` on every PR, and its first runs found and fixed:
+the font build-blocker, 5 genuine `tsc` errors (a Movie filter being passed to `Series`), and a lint
+config that made `npm run lint` fail on the Electron main process.
 
 ## 2. What the unit suite actually covers
 
@@ -89,8 +93,8 @@ npx tsc --noEmit | grep -vE "has no exported member|\.prisma/client"
 
 ## 7. Test plan to close the gap (ordered)
 
-1. **CI** — GitHub Actions: `npm ci --legacy-peer-deps`, `tsc`, `eslint`, `vitest`, plus a build job.
-   Nothing else matters until this exists.
+1. ~~**CI** — `npm ci --legacy-peer-deps`, `tsc`, `eslint`, `vitest`, plus a build job.~~
+   **Done** (`.github/workflows/ci.yml`, green on 2026-11-02).
 2. **DB integration tests** — a disposable MySQL service container, `prisma db push`, then tests for
    `access.ts`, `billing.ts`, `sync/engine.ts`, `streams/report`, `playlist`, `admin/*` guards
    (including cross-tenant 404/403 cases).

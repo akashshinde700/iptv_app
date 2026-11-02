@@ -51,7 +51,37 @@ Fixed by switching to the self-hosted `geist` package (same typeface, same `--fo
 **Evidence:** after the change the build reached `✓ Compiled successfully in 1232ms` — it now fails
 later, on the Prisma client (§2.2), which is environmental.
 
-### 2.2 ENVIRONMENTAL — `@prisma/client` is not generated in this sandbox
+### 2.2 FIXED IN CI — the build also failed on 5 real type errors (and one lint failure)
+
+The new CI workflow generated the Prisma client on a machine that can download the engines, and its
+**first run reported what the sandbox never could**:
+
+```
+src/lib/server/media/catalog.ts:101  Type '{ genre; organizationId; isActive; isNsfw; … }' is not assignable to 'SeriesWhereInput'
+src/lib/server/media/catalog.ts:40-42 Type 'string | StringFilter<"Movie">' is not assignable to 'string & …'
+src/app/api/cron/health/route.ts:51  Argument of type '{…}' is not assignable to parameter of type 'never'
+```
+
+Three real defects behind five errors:
+
+1. **`liveSource()` returned `{…} & Prisma.MovieWhereInput`.** The intersection types each literal as
+   *both* a value and a filter (`true & BoolFilter<"Movie">`), which Prisma's own types reject. It now
+   returns the plain `MovieWhereInput`.
+2. **A Movie `where` clause was handed to `db.series.findMany`** (the genre rail). It "worked" only
+   because the columns overlap — the `as Prisma.SeriesWhereInput` casts elsewhere had been hiding it.
+   Series now has its own `liveSeriesSource()`, and every series query builds a typed where.
+3. **`const results = []` in the cron route inferred `never[]`**, so `push()` did not type check.
+
+Then `npm run lint` failed on `desktop/main.js` — a separate CommonJS Electron project — because
+`eslint .` applies the Next.js web config, which forbids `require()`. `desktop/**` now gets CommonJS
+globals with the rest of the rules intact.
+
+**Why this was the most important finding of the pass:** `next.config.ts` deliberately has
+`typescript.ignoreBuildErrors` **off**, so those five errors meant **a production build could not
+complete at all**. The deployed app could only have been built from a tree where the Prisma types
+were absent — i.e. nobody had run a real build.
+
+### 2.2b ENVIRONMENTAL — `@prisma/client` is not generated in this sandbox
 
 ```
 Error: Failed to collect configuration for /api/admin/audit-logs
@@ -64,8 +94,7 @@ install has no models — which is also the source of the ~110 `tsc` errors in �
 none of our models, so every `Prisma.ChannelWhereInput`, `db.channel.*` etc. is "missing").
 
 **Conclusion:** `next build` cannot complete in *this* sandbox for reasons that have nothing to do
-with the code. It must be proven where the engines are reachable — which is exactly what the new CI
-workflow does (§5). This is not reported as "build passes".
+with the code — and that is exactly why it was proven in CI instead (§5).
 
 ---
 
@@ -99,20 +128,29 @@ files touched by the audit.
 | 3 | Dead vendored code: `ui/chart.tsx` held the only `dangerouslySetInnerHTML` sink, `ui/carousel.tsx` produced a lint error; neither is imported anywhere | Low | both removed (recoverable from git history / shadcn) |
 | 4 | `.env.example` documented 6 variables; the code reads 25 — including `ADMIN_PASSWORD`, `PUBLIC_BASE_URL`, `ROOT_ORG_SLUG` and `STOREFRONT_BASE_DOMAIN`, i.e. the ones a fresh deploy silently gets wrong | Medium | every variable the code reads is now documented with its failure mode |
 | 5 | **No CI** — nothing ran type check / lint / tests before a merge | High | `.github/workflows/ci.yml`: install → `prisma generate` → `db push` on a throwaway MySQL → typecheck → lint → tests → build |
+| 6 | **Production build was impossible:** 5 real `tsc` errors (hidden locally by the ungenerated client) + `npm run lint` failing on `desktop/main.js` | **Critical** (blocks release) | typed `liveSource`/`liveSeriesSource` split, no Movie filter on Series, typed cron results, CommonJS override for `desktop/` |
 
 ---
 
-## 5. What the new CI proves (once it runs on GitHub)
+## 5. CI: green, and what it proves
 
-The workflow turns the two "unverifiable here" claims into facts on a machine that can download the
-Prisma engines:
+Run [`41385654349`](https://github.com/akashshinde700/iptv_app/actions/runs/41385654349) on
+`0874d47` — **every step passed**:
 
-1. `prisma generate` + `prisma db push` against a disposable MySQL 8 service.
-2. `tsc` **without** the Prisma-stub noise → the 30 files above either pass or reveal real errors.
-3. `next build` completes (fonts are now local, so the only network dependency is npm itself).
-4. The unit suite stays at 173.
+| Step | Result |
+|---|---|
+| Install (`npm ci --legacy-peer-deps`) | ✅ |
+| `prisma generate` | ✅ |
+| `prisma db push` → disposable MySQL 8 | ✅ |
+| **`npm run typecheck`** | ✅ *(after the 5 fixes in §2.2)* |
+| **`npm run lint`** | ✅ *(after the `desktop/` config fix)* |
+| **`npm test`** | ✅ 173 tests |
+| **`npx next build`** | ✅ **first proven production build of this project** |
 
-Until its first green run, "the build works" remains **unproven**.
+So three claims that had been marked "unverifiable here" are now facts: the Prisma schema is valid,
+the tree type-checks against the real generated client, and the app **builds for production** with
+`typescript.ignoreBuildErrors` off. What CI still does not cover: runtime behaviour (no browser, no
+device, no seeded data), i.e. §6 stays as it is.
 
 ---
 
@@ -133,10 +171,13 @@ Until its first green run, "the build works" remains **unproven**.
 
 ## 7. Verdict
 
-* **Code-level:** the merged tree is consistent — 173 tests green, lint clean, no dead secrets, no
-  debug leftovers, the schema parses, the platform-specific XML is valid, the PWA assets resolve.
-* **Two genuine defects were found and fixed in this pass** (the build-blocking font fetch, and a
-  lint/quality set including the sole HTML-injection sink).
-* **The one thing still standing between "looks right" and "proven":** a build and an integration run
-  with a real Prisma client and a real database. That is now wired into CI; it needs a green run on
-  GitHub, and the mobile/desktop items still need hardware.
+* **Code-level:** consistent — 173 tests green, lint clean, no dead secrets, no debug leftovers, the
+  schema parses, the platform XML is valid, the PWA assets resolve.
+* **The headline finding:** the project **could not be built for production**. Not because of one
+  typo, but because `next build` type-checks and five genuine type errors were invisible in every
+  environment that lacked a generated Prisma client. They are fixed, and CI now proves the build.
+* **Three defects found and fixed in this pass:** the build-blocking font fetch, the five type errors
+  plus the lint config that made `npm run lint` fail, and a quality set (cascading renders, the sole
+  HTML-injection sink, undocumented env vars).
+* **Still unproven:** runtime behaviour — no browser, no device, no seeded database here. CI covers
+  compile/type/lint/unit; it does not cover "does the player play".
