@@ -45,7 +45,8 @@ async function handle(request: Request): Promise<Response> {
     take: 50,
   })
 
-  const results = []
+  // Typed explicitly: `const results = []` infers `never[]`, which the build's type check rejects.
+  const results: Array<Record<string, unknown>> = []
   for (const org of orgs) {
     // A shared budget across tenants keeps one cron invocation bounded.
     results.push({

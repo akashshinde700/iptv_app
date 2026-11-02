@@ -35,12 +35,34 @@ const TABS: MediaHome["tabs"] = [
 const CACHE_TTL_MS = 3 * 60 * 1000;
 const railCache = new Map<string, { at: number; home: MediaHome }>();
 
-function liveSource(organizationId: string): { organizationId: string; isActive: true; isNsfw: false } & Prisma.MovieWhereInput {
+/**
+ * The "this row is actually watchable" clause for VOD.
+ *
+ * Returns the plain Prisma filter type, not `{…} & Prisma.MovieWhereInput`: the intersection made
+ * the literals *both* a value and a filter (`true & BoolFilter<"Movie">`), which Prisma's own
+ * types reject — `tsc` (and therefore `next build`, which type-checks) failed with 4 errors here
+ * that the ungenerated local client hid.
+ */
+function liveSource(organizationId: string): Prisma.MovieWhereInput {
   return {
     organizationId,
     isActive: true,
     isNsfw: false,
     ...(portalValidityClause() as Prisma.MovieWhereInput),
+  };
+}
+
+/**
+ * The same clause for Series. Movie and Series share these columns, so the shape is identical —
+ * but the *types* are not interchangeable, so series queries get their own builder instead of a
+ * `{ ...movieWhere } as Prisma.SeriesWhereInput` cast at each call site.
+ */
+function liveSeriesSource(organizationId: string): Prisma.SeriesWhereInput {
+  return {
+    organizationId,
+    isActive: true,
+    isNsfw: false,
+    ...(portalValidityClause() as Prisma.SeriesWhereInput),
   };
 }
 
@@ -88,17 +110,19 @@ async function genreRail(
   kind: "movie" | "series",
   genre: string,
 ): Promise<MediaRail | null> {
-  const where = { ...liveSource(ctx.organizationId), genre };
+  // Two typed wheres: a Movie filter must never be handed to the Series table (it used to be).
+  const movieWhere: Prisma.MovieWhereInput = { ...liveSource(ctx.organizationId), genre };
+  const seriesWhere: Prisma.SeriesWhereInput = { ...liveSeriesSource(ctx.organizationId), genre };
   const rows =
     kind === "movie"
       ? await db.movie.findMany({
-          where,
+          where: movieWhere,
           select: MOVIE_CARD_SELECT,
           orderBy: { addedAt: "desc" },
           take: RAIL_SIZE,
         })
       : await db.series.findMany({
-          where,
+          where: seriesWhere,
           select: SERIES_CARD_SELECT,
           orderBy: { addedAt: "desc" },
           take: RAIL_SIZE,
@@ -113,8 +137,8 @@ async function genreRail(
 }
 
 async function buildHome(ctx: MediaContext): Promise<MediaHome> {
-  const movieWhere = liveSource(ctx.organizationId);
-  const seriesWhere = { ...movieWhere } as Prisma.SeriesWhereInput;
+  const movieWhere: Prisma.MovieWhereInput = liveSource(ctx.organizationId);
+  const seriesWhere: Prisma.SeriesWhereInput = liveSeriesSource(ctx.organizationId);
 
   const [movies, series, movieGenres, seriesGenres] = await Promise.all([
     db.movie.findMany({
@@ -198,7 +222,7 @@ async function search(ctx: MediaContext, query: string): Promise<MediaCard[]> {
   const [movies, series] = await Promise.all([
     db.movie.findMany({ where: movieWhere, select: MOVIE_CARD_SELECT, orderBy: { title: "asc" }, take: 24 }),
     db.series.findMany({
-      where: { ...movieWhere } as Prisma.SeriesWhereInput,
+      where: { ...liveSeriesSource(ctx.organizationId), title: { contains: q } },
       select: SERIES_CARD_SELECT,
       orderBy: { title: "asc" },
       take: 24,
