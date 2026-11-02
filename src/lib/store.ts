@@ -162,6 +162,66 @@ function sameView(a: View, b: View): boolean {
   return true;
 }
 
+/* ---------------------------- persisted state ---------------------------- */
+
+/** Current shape of the persisted blob. Bump together with any change to `partialize`. */
+export const PERSIST_VERSION = 2;
+
+type PersistedShape = Pick<
+  AppState,
+  "browseFilters" | "favorites" | "recents" | "recentMovies" | "progress" | "premium" | "tvMode"
+>;
+
+/**
+ * Upgrade an older saved blob. Runs on every load where the stored version differs, so it must be
+ * total: never throw (a throwing migrate leaves the app on a blank screen), and always return a
+ * shape `mergePersisted` understands.
+ */
+export function migratePersisted(persisted: unknown, fromVersion: number): unknown {
+  if (!persisted || typeof persisted !== "object") return {};
+  const saved = { ...(persisted as Record<string, unknown>) };
+
+  // v0/1 stored the navigation stack and the current view in localStorage; the URL now owns that,
+  // and a stale `view` would drop the visitor onto whatever screen they last had months ago.
+  delete saved.view;
+  delete saved.stack;
+  delete saved.restore;
+  delete saved.watchContext;
+  delete saved.searchQuery;
+
+  // v1 could store `browseFilters` without `collection` (added later); defaults fill that in.
+  if (fromVersion < 2) {
+    const filters = saved.browseFilters;
+    saved.browseFilters = filters && typeof filters === "object" ? filters : {};
+  }
+  return saved;
+}
+
+/** Merge persisted values onto the in-memory defaults, type-checking each one. */
+export function mergePersisted(persisted: unknown, current: AppState): AppState {
+  const saved = (persisted && typeof persisted === "object" ? persisted : {}) as Partial<PersistedShape>;
+  const arrayOf = <T,>(value: unknown): T[] => (Array.isArray(value) ? (value as T[]) : []);
+
+  return {
+    ...current,
+    // Only keys present in `partialize` are taken from storage — an unknown key can no longer
+    // overwrite live state (this is how a stale `view`/`stack` used to win over the URL).
+    browseFilters: {
+      ...DEFAULT_FILTERS,
+      ...(saved.browseFilters && typeof saved.browseFilters === "object" ? saved.browseFilters : {}),
+    },
+    favorites: arrayOf(saved.favorites),
+    recents: arrayOf(saved.recents),
+    recentMovies: arrayOf(saved.recentMovies),
+    progress:
+      saved.progress && typeof saved.progress === "object" && !Array.isArray(saved.progress)
+        ? saved.progress
+        : {},
+    premium: saved.premium === true,
+    tvMode: saved.tvMode === true,
+  };
+}
+
 export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
@@ -295,6 +355,13 @@ export const useAppStore = create<AppState>()(
       name: "streamkaro-app",
       storage: createJSONStorage(() => localStorage),
       skipHydration: true,
+      /**
+       * Bumped whenever the persisted shape changes. Without a version, a visitor who had used an
+       * older build kept its `localStorage` blob forever: new fields stayed at their defaults,
+       * removed fields leaked back in through the merge spread, and a malformed value (e.g.
+       * `progress` saved as an array) crashed the screen with no way out but devtools.
+       */
+      version: PERSIST_VERSION,
       partialize: (state) => ({
         browseFilters: state.browseFilters,
         favorites: state.favorites,
@@ -304,15 +371,8 @@ export const useAppStore = create<AppState>()(
         premium: state.premium,
         tvMode: state.tvMode,
       }),
-      // older saved filters predate `collection`
-      merge: (persisted, current) => {
-        const saved = (persisted ?? {}) as Partial<AppState>;
-        return {
-          ...current,
-          ...saved,
-          browseFilters: { ...DEFAULT_FILTERS, ...(saved.browseFilters ?? {}) },
-        };
-      },
+      migrate: (persisted, version) => migratePersisted(persisted, version),
+      merge: (persisted, current) => mergePersisted(persisted, current),
     }
   )
 );

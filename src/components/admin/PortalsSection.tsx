@@ -55,7 +55,7 @@ import {
   type BulkPreview,
   type SyncLogItem,
 } from "@/lib/admin-api";
-import { daysLeft, fmtDate, fmtNumber, PORTAL_TYPE_LABEL, StatusBadge } from "./shared";
+import { daysLeft, fmtDate, fmtNumber, PORTAL_TYPE_LABEL, StatusBadge, ConfirmButton, TableState } from "./shared";
 
 function AddPortalDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const queryClient = useQueryClient();
@@ -657,12 +657,15 @@ export function PortalsSection() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {portalsQuery.isLoading && (
-              <TableRow>
-                <TableCell colSpan={8} className="py-10 text-center text-zinc-500">Load ho raha hai…</TableCell>
-              </TableRow>
-            )}
-            {!portalsQuery.isLoading && filtered.length === 0 && (
+            <TableState
+              colSpan={8}
+              isLoading={portalsQuery.isLoading}
+              isError={portalsQuery.isError}
+              error={portalsQuery.error}
+              onRetry={() => portalsQuery.refetch()}
+              empty="Koi source nahi."
+            />
+            {!portalsQuery.isLoading && !portalsQuery.isError && filtered.length === 0 && (
               <TableRow>
                 <TableCell colSpan={8} className="py-10 text-center text-zinc-500">
                   {statusFilter === "ALL"
@@ -744,18 +747,14 @@ export function PortalsSection() {
                       >
                         <Power className={`h-4 w-4 ${portal.isActive ? "text-orange-400" : "text-emerald-400"}`} />
                       </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        title="Delete"
-                        onClick={() => {
-                          if (confirm(`${portal.name} + uske ${portal.channelCount} channels delete karein?`)) {
-                            del.mutate(portal.id);
-                          }
-                        }}
+                      <ConfirmButton
+                        titleAttr="Delete"
+                        title={`Delete ${portal.name} and its ${portal.channelCount} channels?`}
+                        description="The source is removed from every catalog and playlist. This cannot be undone."
+                        onConfirm={() => del.mutate(portal.id)}
                       >
                         <Trash2 className="h-4 w-4 text-red-400" />
-                      </Button>
+                      </ConfirmButton>
                     </div>
                   </TableCell>
                 </TableRow>

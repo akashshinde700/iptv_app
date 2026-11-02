@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "sonner";
 import { Loader2 } from "lucide-react";
 import { useAppStore, useIsTv, type View } from "@/lib/store";
+import { pathForView, viewFromPath } from "@/lib/deep-link";
 import { detectPlatform } from "@/lib/platform";
 import { getNativeAppInfo } from "@/lib/native";
 import { handleBack, hasOpenOverlay, installBackBridge, isSyntheticEscape } from "@/lib/back";
@@ -91,7 +92,19 @@ export function AppShell() {
     const info = detectPlatform();
     const { setPlatform } = useAppStore.getState();
     setPlatform({ platform: info.platform, isNativeShell: info.isNativeShell, isElectron: info.isElectron });
-    Promise.resolve(useAppStore.persist.rehydrate()).finally(() => setReady(true));
+    Promise.resolve(useAppStore.persist.rehydrate()).finally(() => {
+      // Deep link: /watch/<id>, /movies/<id>, /admin, ?view=… — boot on that screen instead of
+      // always starting at Home. This is what makes refreshes, bookmarks, shared links and the
+      // iOS shell's streamkaro:// links addressable. `navigate()` keeps Home underneath, so Back
+      // still behaves.
+      if (!info.overridden) {
+        const target = viewFromPath(window.location.pathname, window.location.search);
+        if (target && target.name !== "home") useAppStore.getState().navigate(target);
+        // Old "#admin" links (they never actually worked — the hash only picked a section).
+        else if (window.location.hash.startsWith("#admin")) useAppStore.getState().navigate({ name: "admin" });
+      }
+      setReady(true);
+    });
     // the Android shell knows for sure whether it runs on a TV
     if (info.isNativeShell && !info.overridden) {
       getNativeAppInfo().then((native) => {
@@ -177,6 +190,17 @@ export function AppShell() {
       window.removeEventListener("keydown", onKey);
     };
   }, [isTv]);
+
+  // Keep the address bar in step with the in-app stack, so a refresh or a copied URL reopens the
+  // same screen. replaceState (not pushState) on purpose: the Back pipeline in lib/back.ts owns
+  // the history entries, and a second source of truth would fight it.
+  useEffect(() => {
+    if (!ready) return;
+    const path = pathForView(view);
+    if (window.location.pathname !== path) {
+      window.history.replaceState(window.history.state, "", path);
+    }
+  }, [view, ready]);
 
   // new screen: top + logical focus; Back: previous scroll offset + the item the user left from
   useLayoutEffect(() => {

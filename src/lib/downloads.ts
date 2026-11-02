@@ -11,17 +11,23 @@ export const APP_VERSION = "0.5.0";
  * compare `versionCode` via /api/app/version and offer an in-app update.
  */
 export const ANDROID_RELEASE = {
-  version: "0.4.2",
-  versionCode: 5,
+  // Must match android/app/build.gradle (versionName / versionCode) — the number baked into the
+  // APK is what an installed app compares against, so a mismatch means "no update available"
+  // forever or an update loop.
+  version: "0.5.0",
+  versionCode: 6,
   notes: [
+    "Works with the new shareable links — open a channel straight from a link or bookmark",
+    "Password change for admins, and a safer first login",
+    "Sources you switch off in the panel now stay off",
     "Back button no longer closes the app while it is starting",
     "Automatic multi-source failover — if one source drops, the channel switches to a backup without interruption",
     "Smarter filters — language and category now combine correctly (e.g. Hindi + Movies), with counts that match your selection",
     "More reliable playlist imports — duplicate entries no longer break a source sync",
     "Stability and playback fixes",
   ],
-  mobile: "/downloads/StreamKaro-0.4.2.apk",
-  tv: "/downloads/StreamKaro-TV-0.4.2.apk",
+  mobile: "/downloads/StreamKaro-0.5.0.apk",
+  tv: "/downloads/StreamKaro-TV-0.5.0.apk",
 };
 
 export interface DownloadTarget {

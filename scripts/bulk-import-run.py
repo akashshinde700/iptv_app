@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Bulk import driver: preview + import both credential dumps, then sample-sync."""
 import json
+import os
 import subprocess
 import sys
 import time
@@ -31,7 +32,12 @@ def req(path, data=None, method="GET"):
 
 
 def login():
-    body = json.dumps({"username": "admin", "password": "StreamKaro@2024"}).encode()
+    # Credentials come from the environment — never hardcode the owner password in a script.
+    username = os.environ.get("ADMIN_USERNAME", "admin")
+    password = os.environ.get("ADMIN_PASSWORD")
+    if not password:
+        raise SystemExit("Set ADMIN_PASSWORD (and optionally ADMIN_USERNAME) before running this script")
+    body = json.dumps({"username": username, "password": password}).encode()
     r = urllib.request.Request(BASE + "/api/admin/auth/login", data=body, method="POST")
     r.add_header("Content-Type", "application/json")
     with urllib.request.urlopen(r, timeout=30) as resp:

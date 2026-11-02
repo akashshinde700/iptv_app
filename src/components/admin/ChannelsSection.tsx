@@ -41,7 +41,7 @@ import {
   updateAdminChannel,
   type AdminChannel,
 } from "@/lib/admin-api";
-import { MultiSelect, fmtNumber } from "./shared";
+import { MultiSelect, fmtNumber, ConfirmButton, TableState } from "./shared";
 
 function EditChannelDialog({
   channel,
@@ -282,9 +282,16 @@ export function ChannelsSection() {
           <Button size="sm" variant="outline" onClick={() => bulk.mutate({ ids: [...selected], action: "deactivate" })}>
             <Ban className="mr-1 h-3.5 w-3.5" /> Deactivate
           </Button>
-          <Button size="sm" variant="destructive" onClick={() => { if (confirm(`${selected.size} channels delete karein?`)) bulk.mutate({ ids: [...selected], action: "delete" }); }}>
+          <ConfirmButton
+            size="sm"
+            variant="destructive"
+            className=""
+            title={`Delete ${selected.size} channel${selected.size === 1 ? "" : "s"}?`}
+            description="Deleted channels are removed from every customer's catalog and playlist. This cannot be undone."
+            onConfirm={() => bulk.mutate({ ids: [...selected], action: "delete" })}
+          >
             <Trash2 className="mr-1 h-3.5 w-3.5" /> Delete
-          </Button>
+          </ConfirmButton>
         </div>
       )}
 
@@ -304,16 +311,15 @@ export function ChannelsSection() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {channelsQuery.isLoading && (
-              <TableRow>
-                <TableCell colSpan={9} className="py-10 text-center text-zinc-500">Load ho raha hai…</TableCell>
-              </TableRow>
-            )}
-            {!channelsQuery.isLoading && items.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={9} className="py-10 text-center text-zinc-500">Koi channel match nahi hua.</TableCell>
-              </TableRow>
-            )}
+            <TableState
+              colSpan={9}
+              isLoading={channelsQuery.isLoading}
+              isError={channelsQuery.isError}
+              error={channelsQuery.error}
+              onRetry={() => channelsQuery.refetch()}
+              isEmpty={items.length === 0}
+              empty="Koi channel match nahi hua — filter hata ke dekho."
+            />
             {items.map((channel) => (
               <TableRow key={channel.id} className="border-zinc-800">
                 <TableCell>

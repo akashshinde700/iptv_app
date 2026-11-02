@@ -23,7 +23,7 @@
  */
 import { db } from '@/lib/db'
 import { FAILURE_THRESHOLD } from '@/lib/server/iptv'
-import { isPublicHttpUrl } from '@/lib/server/net-guard'
+import { isPublicHttpUrl, resolvedPublicUrl } from '@/lib/server/net-guard'
 
 /** How a single probe finished. */
 export interface ProbeOutcome {
@@ -55,6 +55,10 @@ interface ProbeTarget {
  */
 export async function probeStreamUrl(target: ProbeTarget): Promise<ProbeOutcome> {
   if (!isPublicHttpUrl(target.url)) {
+    return { ok: false, detail: 'blocked-host', latencyMs: null }
+  }
+  // A hostname can look public and still resolve into the private network (rebinding, nip.io).
+  if (!(await resolvedPublicUrl(target.url))) {
     return { ok: false, detail: 'blocked-host', latencyMs: null }
   }
 
@@ -100,26 +104,39 @@ export async function probeStreamUrl(target: ProbeTarget): Promise<ProbeOutcome>
   }
 }
 
+/**
+ * A probe never overrides an operator's decision (BUG-07).
+ *
+ * The health sweep used to flip every successful probe back to ACTIVE, so an operator who
+ * deliberately switched a bad/geo-blocked/leaky source off found it switched back on within
+ * minutes — and a client "ok" report did the same. `disabledBy` distinguishes the two reasons:
+ * only an AUTO disable is recoverable by a passing probe.
+ */
+export function canProbeRevive(stream: { status: string; disabledBy?: string | null }): boolean {
+  return stream.status !== 'DISABLED' || (stream.disabledBy ?? 'AUTO') !== 'OPERATOR'
+}
+
 /** Persist a probe result on one stream (and flip ACTIVE/DISABLED at the threshold). */
 export async function recordProbe(
-  stream: { id: string; failureCount: number; status: string },
+  stream: { id: string; failureCount: number; status: string; disabledBy?: string | null },
   outcome: ProbeOutcome,
 ): Promise<{ status: string; failureCount: number; changed: boolean }> {
   const now = new Date()
   if (outcome.ok) {
-    const changed = stream.status !== 'ACTIVE' || stream.failureCount !== 0
+    const operatorDisabled = !canProbeRevive(stream)
+    const changed = !operatorDisabled && (stream.status !== 'ACTIVE' || stream.failureCount !== 0)
     await db.stream.update({
       where: { id: stream.id },
       data: {
-        status: 'ACTIVE',
+        // An operator-disabled source stays disabled; we still record that it answered.
+        ...(operatorDisabled ? {} : { status: 'ACTIVE', lastError: null }),
         failureCount: 0,
         lastOkAt: now,
         lastProbeAt: now,
         latencyMs: outcome.latencyMs,
-        lastError: null,
       },
     })
-    return { status: 'ACTIVE', failureCount: 0, changed }
+    return { status: operatorDisabled ? 'DISABLED' : 'ACTIVE', failureCount: 0, changed }
   }
 
   const failureCount = stream.failureCount + 1
@@ -132,7 +149,7 @@ export async function recordProbe(
       lastProbeAt: now,
       latencyMs: outcome.latencyMs,
       lastError: outcome.detail.slice(0, 200),
-      ...(disabled ? { status: 'DISABLED' } : {}),
+      ...(disabled ? { status: 'DISABLED', disabledBy: 'AUTO' } : {}),
     },
   })
   return { status: disabled ? 'DISABLED' : stream.status, failureCount, changed: disabled && stream.status !== 'DISABLED' }
@@ -271,6 +288,7 @@ export async function runHealthSweep(
       userAgent: true,
       referrer: true,
       status: true,
+      disabledBy: true,
       failureCount: true,
       channelId: true,
     },
@@ -305,7 +323,7 @@ export async function runHealthSweep(
       if (outcome.ok) summary.ok += 1
       else summary.failed += 1
       if (result.status === 'DISABLED' && result.changed) summary.disabled += 1
-      if (outcome.ok && stream.status === 'DISABLED') summary.recovered += 1
+      if (outcome.ok && result.status === 'ACTIVE' && stream.status === 'DISABLED') summary.recovered += 1
       touchedChannels.add(stream.channelId)
     }
   }
@@ -398,7 +416,15 @@ export function scheduleChannelRecheck(channelId: string): void {
     try {
       const streams = await db.stream.findMany({
         where: { channelId },
-        select: { id: true, url: true, userAgent: true, referrer: true, status: true, failureCount: true },
+        select: {
+          id: true,
+          url: true,
+          userAgent: true,
+          referrer: true,
+          status: true,
+          disabledBy: true,
+          failureCount: true,
+        },
         take: 12,
       })
       for (const stream of streams) {

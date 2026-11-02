@@ -85,7 +85,7 @@ function OrganizationsList() {
         <TableShell minWidth={900}>
           <thead>
             <tr>
-              <Th>Organization</Th>
+              <Th sticky>Organization</Th>
               <Th>Status</Th>
               <Th>Platform plan</Th>
               <Th className="text-right">Customers</Th>
@@ -97,7 +97,7 @@ function OrganizationsList() {
           <tbody>
             {(orgs.data ?? []).map((o) => (
               <tr key={o.id} className="hover:bg-zinc-900/60">
-                <Td>
+                <Td sticky>
                   <button className="text-left" onClick={() => go("organizations", { id: o.id })}>
                     <div className="font-medium text-zinc-100 hover:underline">{o.name}</div>
                     <div className="text-xs text-zinc-500">

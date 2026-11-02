@@ -5,6 +5,27 @@ const APP_URL = process.env.STREAMKARO_URL || 'https://www.streamkaro.aetherdevs
 
 let win = null
 
+/**
+ * Is `url` inside the app, and may it load in the shell?
+ *
+ * SEC-10: the old check was `url.startsWith(APP_URL)`, and APP_URL did not end with a slash —
+ * so `https://www.streamkaro.aetherdevsolutions.in.evil.com` passed the prefix test and rendered
+ * attacker content inside the app window (which can then phish the real login page). Compare the
+ * parsed ORIGIN instead, and treat only our own origin (plus its subdomains) as internal.
+ */
+function isInternalUrl(rawUrl) {
+  try {
+    const target = new URL(rawUrl)
+    const app = new URL(APP_URL)
+    if (target.protocol !== 'https:' && target.protocol !== 'http:') return false
+    if (target.origin === app.origin) return true
+    // Tenant storefronts are subdomains of the configured base host.
+    return target.protocol === app.protocol && target.hostname.endsWith(`.${app.hostname}`)
+  } catch {
+    return false
+  }
+}
+
 function createWindow() {
   win = new BrowserWindow({
     width: 1360,
@@ -32,9 +53,10 @@ function createWindow() {
     return { action: 'deny' }
   })
   win.webContents.on('will-navigate', (e, url) => {
-    if (!url.startsWith(APP_URL)) {
+    if (!isInternalUrl(url)) {
       e.preventDefault()
-      shell.openExternal(url)
+      // Only hand real web links to the browser; never let a hostile scheme reach the OS handler.
+      if (/^https?:$/.test(safeProtocol(url))) shell.openExternal(url)
     }
   })
 
@@ -71,13 +93,37 @@ function createWindow() {
   })
 }
 
-app.whenReady().then(() => {
-  createWindow()
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
-  })
-})
+function safeProtocol(rawUrl) {
+  try {
+    return new URL(rawUrl).protocol
+  } catch {
+    return ''
+  }
+}
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit()
-})
+// DSK-02: a second launch (double-clicking the shortcut again) should focus the existing window
+// instead of starting a second copy — two copies share one login cookie and fight over playback.
+const gotTheLock = app.requestSingleInstanceLock()
+if (!gotTheLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    if (!win) return
+    if (win.isMinimized()) win.restore()
+    win.show()
+    win.focus()
+  })
+}
+
+if (gotTheLock) {
+  app.whenReady().then(() => {
+    createWindow()
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    })
+  })
+
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') app.quit()
+  })
+}

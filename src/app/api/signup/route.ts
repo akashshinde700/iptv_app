@@ -1,5 +1,5 @@
 import { db } from '@/lib/db'
-import { clientIp, hashPassword, rateLimit, toErrorResponse, HttpError } from '@/lib/server/auth'
+import { clientIp, hashPassword, isUniqueViolation, rateLimit, toErrorResponse, HttpError } from '@/lib/server/auth'
 import { RESERVED_SLUGS, storefrontBaseDomain } from '@/lib/server/tenant'
 
 export const dynamic = 'force-dynamic'
@@ -60,27 +60,37 @@ export async function POST(request: Request) {
     if (slugTaken) throw new HttpError(409, 'That subdomain is already taken')
 
     const now = new Date()
-    const org = await db.organization.create({
-      data: {
-        slug,
-        name: orgName,
-        status: 'TRIAL',
-        platformPlan: 'TRIAL',
-        platformTrialEndsAt: new Date(now.getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000),
-        supportEmail: email,
-        admins: {
-          create: {
-            username,
-            email,
-            passwordHash: hashPassword(password),
-            role: 'OWNER',
-            isActive: true,
-            isPlatformStaff: false,
+    // Two requests can pass the availability check above at the same time; the unique index on
+    // Organization.slug is the real arbiter, so translate its error instead of leaking a 500.
+    let org: { id: string; slug: string; platformTrialEndsAt: Date | null }
+    try {
+      org = await db.organization.create({
+        data: {
+          slug,
+          name: orgName,
+          status: 'TRIAL',
+          platformPlan: 'TRIAL',
+          platformTrialEndsAt: new Date(now.getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000),
+          supportEmail: email,
+          admins: {
+            create: {
+              username,
+              email,
+              passwordHash: hashPassword(password),
+              role: 'OWNER',
+              isActive: true,
+              isPlatformStaff: false,
+            },
           },
         },
-      },
-      select: { id: true, slug: true, platformTrialEndsAt: true },
-    })
+        select: { id: true, slug: true, platformTrialEndsAt: true },
+      })
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw new HttpError(409, 'That subdomain was just taken — please choose another')
+      }
+      throw error
+    }
 
     const base = storefrontBaseDomain()
     return Response.json(

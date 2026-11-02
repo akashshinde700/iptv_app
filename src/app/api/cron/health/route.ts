@@ -1,5 +1,6 @@
 import { db } from '@/lib/db'
 import { runHealthSweep } from '@/lib/server/health-doctor'
+import { reconcileCustomerAccess } from '@/lib/server/billing'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -31,6 +32,13 @@ async function handle(request: Request): Promise<Response> {
   const slug = url.searchParams.get('org')
   const budgetMs = Number(url.searchParams.get('budgetMs') ?? '') || undefined
 
+  // BUG-14: flip lapsed plans to their real state before the sweep, so the numbers the sweep
+  // reports (and the "expired" counters in both dashboards) match reality.
+  const billing = await reconcileCustomerAccess({ limit: 200 }).catch((error) => {
+    console.error('cron: access reconciliation failed', error)
+    return null
+  })
+
   const orgs = await db.organization.findMany({
     where: { status: { in: ['ACTIVE', 'TRIAL'] }, ...(slug ? { slug } : {}) },
     select: { id: true, slug: true },
@@ -46,7 +54,7 @@ async function handle(request: Request): Promise<Response> {
     })
   }
 
-  return Response.json({ ok: true, organizations: results.length, results })
+  return Response.json({ ok: true, organizations: results.length, billing, results })
 }
 
 export const GET = handle

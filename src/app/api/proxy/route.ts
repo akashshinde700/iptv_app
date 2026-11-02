@@ -1,3 +1,4 @@
+import { isPublicHttpUrl, resolvedPublicUrl } from '@/lib/server/net-guard'
 import { signedProxyPath, verifyProxyParams } from '@/lib/server/proxy-sign'
 
 export const dynamic = 'force-dynamic'
@@ -24,43 +25,13 @@ function jsonError(status: number, message: string): Response {
 }
 
 /**
- * SSRF guard based on plain string checks of the hostname (no DNS resolution):
- * localhost / *.local / *.internal, 127.x, 10.x, 192.168.x, 172.16-31.x,
- * 169.254.x, 0.0.0.0, ::1, decimal/hex IPv4 forms and a few IPv6 private forms.
+ * Host safety is delegated to `net-guard` — it checks the literal **and** the resolved
+ * addresses, so a hostname that answers with a private IP (rebinding, nip.io) is blocked too.
+ * (This file used to carry its own string-only copy of the check.)
  */
-function isPrivateHost(hostname: string): boolean {
-  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '')
-  if (!host) return true
-  if (host === 'localhost' || host === '0.0.0.0' || host === '::1' || host === '::') return true
-  if (host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal')) return true
-
-  const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
-  if (ipv4) return isPrivateV4(ipv4.slice(1).map((n) => Number.parseInt(n, 10)))
-
-  // Bare decimal (http://2130706433/) or hex (http://0x7f000001/) IPv4.
-  if (/^\d{8,10}$/.test(host)) {
-    const n = Number(host)
-    return isPrivateV4([(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255])
-  }
-  if (/^0x[0-9a-f]+$/.test(host)) {
-    const n = Number.parseInt(host, 16)
-    return isPrivateV4([(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255])
-  }
-
-  // IPv6 private / link-local string forms (fc00::/7, fe80::/10, v4-mapped loopback)
-  if (host.startsWith('fc') || host.startsWith('fd') || host.startsWith('fe8')) return true
-  if (host.includes('::ffff:127.') || host.includes('::ffff:10.') || host.includes('::ffff:192.168.')) return true
-  return false
-}
-
-function isPrivateV4([a, b]: number[]): boolean {
-  if ([a, b].some((n) => !Number.isFinite(n) || n < 0 || n > 255)) return true
-  if (a === 0 || a === 10 || a === 127) return true
-  if (a === 169 && b === 254) return true
-  if (a === 172 && b >= 16 && b <= 31) return true
-  if (a === 192 && b === 168) return true
-  if (a === 100 && b >= 64 && b <= 127) return true // CGNAT 100.64.0.0/10
-  return false
+async function assertSafeHop(url: URL): Promise<void> {
+  const blocked = !(await resolvedPublicUrl(url.href))
+  if (blocked) throw new Error('blocked-host')
 }
 
 /** Build a signed proxy URL for an absolute upstream URL, carrying ua/ref through. */
@@ -95,24 +66,26 @@ function rewritePlaylistLine(line: string, base: URL, ua: string | null, ref: st
 }
 
 /**
- * Fetch following redirects manually so every hop is re-checked against the
- * SSRF guard (a permissive upstream can otherwise 302 to a private/metadata IP).
+ * Fetch following redirects manually so every hop is re-checked with the DNS-aware guard
+ * (a permissive upstream can otherwise 302 to a private/metadata address).
  */
 async function fetchNoSSRF(
   startUrl: URL,
   headers: Record<string, string>,
   signal: AbortSignal,
-): Promise<Response> {
+): Promise<{ response: Response; finalUrl: URL }> {
   let current = startUrl
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    if (isPrivateHost(current.hostname)) throw new Error('blocked-host')
-    const res = await fetch(current.href, { headers, redirect: 'manual', signal, cache: 'no-store' })
-    if (res.status >= 300 && res.status < 400 && res.headers.get('location')) {
-      current = new URL(res.headers.get('location')!, current)
-      if (current.protocol !== 'http:' && current.protocol !== 'https:') throw new Error('blocked-host')
+    await assertSafeHop(current)
+    const response = await fetch(current.href, { headers, redirect: 'manual', signal, cache: 'no-store' })
+    const location = response.headers.get('location')
+    if (response.status >= 300 && response.status < 400 && location) {
+      const next = new URL(location, current)
+      if (next.protocol !== 'http:' && next.protocol !== 'https:') throw new Error('blocked-host')
+      current = next
       continue
     }
-    return res
+    return { response, finalUrl: current }
   }
   throw new Error('too-many-redirects')
 }
@@ -137,7 +110,8 @@ export async function GET(request: Request): Promise<Response> {
   if (upstreamUrl.protocol !== 'http:' && upstreamUrl.protocol !== 'https:') {
     return jsonError(400, 'Only http(s) URLs are allowed')
   }
-  if (isPrivateHost(upstreamUrl.hostname)) {
+  // Layer 1 (literal host) + layer 2 (what the host actually resolves to).
+  if (!isPublicHttpUrl(upstreamUrl.href) || !(await resolvedPublicUrl(upstreamUrl.href))) {
     return jsonError(400, 'Blocked host')
   }
 
@@ -150,10 +124,13 @@ export async function GET(request: Request): Promise<Response> {
   if (range) upstreamHeaders.range = range
 
   let upstream: Response
+  let finalUrl: URL
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS)
   try {
-    upstream = await fetchNoSSRF(upstreamUrl, upstreamHeaders, controller.signal)
+    const fetched = await fetchNoSSRF(upstreamUrl, upstreamHeaders, controller.signal)
+    upstream = fetched.response
+    finalUrl = fetched.finalUrl
   } catch (error) {
     clearTimeout(timer)
     const msg = error instanceof Error ? error.message : ''
@@ -174,14 +151,8 @@ export async function GET(request: Request): Promise<Response> {
       return jsonError(502, 'Upstream fetch failed')
     }
 
-    let base: URL = upstreamUrl
-    if (upstream.url) {
-      try {
-        base = new URL(upstream.url)
-      } catch {
-        /* keep upstreamUrl as base */
-      }
-    }
+    // Relative segments resolve against the URL that actually served the manifest.
+    const base: URL = finalUrl
 
     const rewritten = text
       .split(/\r?\n/)

@@ -192,12 +192,49 @@ export function TableShell({ children, minWidth = 760 }: { children: React.React
   );
 }
 
-export function Th({ children, className }: { children?: React.ReactNode; className?: string }) {
-  return <th className={cn("bg-zinc-900/70 px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500", className)}>{children}</th>;
+export function Th({
+  children,
+  className,
+  sticky,
+}: {
+  children?: React.ReactNode;
+  className?: string;
+  sticky?: boolean;
+}) {
+  return (
+    <th
+      className={cn(
+        "bg-zinc-900/70 px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500",
+        // RSP-02: keep the identifying column in view while the rest scrolls on a phone.
+        sticky && "sticky left-0 z-10",
+        className,
+      )}
+    >
+      {children}
+    </th>
+  );
 }
 
-export function Td({ children, className }: { children?: React.ReactNode; className?: string }) {
-  return <td className={cn("border-t border-zinc-800/70 px-3 py-2.5 align-middle", className)}>{children}</td>;
+export function Td({
+  children,
+  className,
+  sticky,
+}: {
+  children?: React.ReactNode;
+  className?: string;
+  sticky?: boolean;
+}) {
+  return (
+    <td
+      className={cn(
+        "border-t border-zinc-800/70 px-3 py-2.5 align-middle",
+        sticky && "sticky left-0 z-10 bg-zinc-950",
+        className,
+      )}
+    >
+      {children}
+    </td>
+  );
 }
 
 export function TableSkeleton({ rows = 6, cols = 6 }: { rows?: number; cols?: number }) {

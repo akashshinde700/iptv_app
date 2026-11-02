@@ -9,7 +9,18 @@ export type GateResult = { ok: true; ctx: MediaContext } | { ok: false; response
 
 export async function mediaGate(request: Request): Promise<GateResult> {
   // Fixture mode exists precisely because there may be no database to authenticate
-  // against — it only ever serves the bundled sample catalog.
+  // against — it only ever serves the bundled sample catalog. It is a *development* mode and
+  // would expose that catalog to anonymous visitors, so it is refused in production even if the
+  // flag is left set in the environment.
+  if (process.env.MEDIA_FIXTURES === "1" && process.env.NODE_ENV === "production") {
+    return {
+      ok: false,
+      response: Response.json(
+        { error: "MEDIA_FIXTURES is a development-only mode and is disabled in production" },
+        { status: 503 },
+      ),
+    };
+  }
   if (process.env.MEDIA_FIXTURES === "1") {
     return { ok: true, ctx: { organizationId: "fixtures", country: "IN" } };
   }

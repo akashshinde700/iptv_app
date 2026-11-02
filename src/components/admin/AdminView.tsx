@@ -30,10 +30,12 @@ import {
   Users,
   Wallet,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useAppStore } from "@/lib/store";
 import {
+  ADMIN_SESSION_EXPIRED_EVENT,
+  adminChangePassword,
   adminLogin,
   adminLogout,
   adminMe,
@@ -139,7 +141,7 @@ function AdminLogin() {
         </form>
       </div>
       <p className="mt-4 text-center text-xs text-zinc-600">
-        Default: admin / StreamKaro@2024 — pehle login ke baad Settings se password badal lo
+        Password bhool gaye? Apne StreamKaro provider se reset karwaayein.
       </p>
     </div>
   );
@@ -253,10 +255,8 @@ function SettingsSection({
           <dt className="text-zinc-500">Role</dt>
           <dd className="text-zinc-200">{admin.role}</dd>
         </dl>
-        <p className="mt-3 text-xs text-zinc-500">
-          Password change + multi-admin management super-admin panel ke agle version me aayega.
-        </p>
       </div>
+      <ChangePasswordCard />
       <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-4 text-sm text-zinc-400">
         <h3 className="mb-2 font-semibold text-zinc-200">Security</h3>
         <ul className="list-inside list-disc space-y-1 text-xs">
@@ -270,9 +270,109 @@ function SettingsSection({
   );
 }
 
+function ChangePasswordCard() {
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const mutation = useMutation({
+    mutationFn: () => adminChangePassword({ currentPassword, newPassword }),
+    onSuccess: () => {
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setError(null);
+      toast.success("Password badal gaya — baaki devices se logout ho gaya");
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-4">
+      <h3 className="mb-1 flex items-center gap-2 font-semibold text-zinc-200">
+        <Lock className="h-4 w-4 text-amber-400" /> Change password
+      </h3>
+      <p className="mb-3 text-xs text-zinc-500">
+        Kam se kam 8 characters, aur letters ke saath number ya symbol. Badalne ke baad baaki har
+        device se logout ho jaayega.
+      </p>
+      <form
+        className="grid max-w-sm gap-3"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (newPassword !== confirmPassword) {
+            setError("Naya password dono jagah same hona chahiye");
+            return;
+          }
+          setError(null);
+          mutation.mutate();
+        }}
+      >
+        <div className="grid gap-2">
+          <Label htmlFor="pw-current">Purana password</Label>
+          <Input
+            id="pw-current"
+            type="password"
+            autoComplete="current-password"
+            value={currentPassword}
+            onChange={(e) => setCurrentPassword(e.target.value)}
+            required
+          />
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor="pw-new">Naya password</Label>
+          <Input
+            id="pw-new"
+            type="password"
+            autoComplete="new-password"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            minLength={8}
+            required
+          />
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor="pw-confirm">Naya password (dobara)</Label>
+          <Input
+            id="pw-confirm"
+            type="password"
+            autoComplete="new-password"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            minLength={8}
+            required
+          />
+        </div>
+        {error && <p className="text-xs text-red-400">{error}</p>}
+        <Button
+          type="submit"
+          size="sm"
+          className="w-full bg-amber-600 hover:bg-amber-500"
+          disabled={mutation.isPending || !currentPassword || newPassword.length < 8}
+        >
+          {mutation.isPending ? "Badal raha hai…" : "Password badlo"}
+        </Button>
+      </form>
+    </div>
+  );
+}
+
 export function AdminView() {
   const navigate = useAppStore((s) => s.navigate);
   const meQuery = useQuery({ queryKey: ["admin-me"], queryFn: adminMe });
+  const queryClient = useQueryClient();
+
+  // A 401 from any admin call (session expired / cookie cleared) drops us back to the login form
+  // instead of leaving the panel on a dead screen.
+  useEffect(() => {
+    const onExpired = () => {
+      queryClient.setQueryData(["admin-me"], { admin: null, organization: null });
+      toast.error("Session khatam — dobara login karo");
+    };
+    window.addEventListener(ADMIN_SESSION_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(ADMIN_SESSION_EXPIRED_EVENT, onExpired);
+  }, [queryClient]);
 
   // support #admin#section deep links (lazy init from hash — no effect needed)
   const [section, setSection] = useState<Section>(() => {

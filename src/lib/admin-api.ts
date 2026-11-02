@@ -146,13 +146,41 @@ export interface AdminMeta {
   categories: string[];
 }
 
+/**
+ * An admin API failure that remembers the HTTP status.
+ *
+ * It used to be a bare `Error`, which threw the status away — so the UI could not tell "your
+ * session expired, sign in again" (401) from "you are not allowed" (403) from "the server broke"
+ * (500), and a stale tab just showed "Request failed" forever instead of asking for a login.
+ */
+export class AdminApiError extends Error {
+  readonly status: number
+  readonly reason?: string
+  constructor(message: string, status: number, reason?: string) {
+    super(message)
+    this.name = "AdminApiError"
+    this.status = status
+    this.reason = reason
+  }
+}
+
+/** Fired when the session is gone, so the admin shell can reset to the login screen. */
+export const ADMIN_SESSION_EXPIRED_EVENT = "streamkaro:admin-session-expired"
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     ...init,
     headers: init?.body instanceof FormData ? init?.headers : { "Content-Type": "application/json", ...init?.headers },
   })
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error((data as { error?: string }).error ?? `Request failed (${res.status})`)
+  const data = (await res.json().catch(() => ({}))) as { error?: string; reason?: string }
+  if (!res.ok) {
+    // A 401 on anything but the login call means the cookie is gone/expired. Broadcast it once so
+    // the panel can show the login form instead of leaving the user on a dead screen.
+    if (res.status === 401 && !url.includes("/auth/login") && typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent(ADMIN_SESSION_EXPIRED_EVENT))
+    }
+    throw new AdminApiError(data.error ?? `Request failed (${res.status})`, res.status, data.reason)
+  }
   return data as T
 }
 
@@ -178,6 +206,17 @@ export interface AdminOrg {
   platformPlan: string
   platformTrialEndsAt: string | null
   platformValidUntil: string | null
+}
+
+/**
+ * Rotate the signed-in admin's own password.
+ * Every other session of that admin is signed out by the server, so a lost/stolen cookie dies here.
+ */
+export async function adminChangePassword(input: { currentPassword: string; newPassword: string }) {
+  return request<{ ok: boolean; otherSessionsSignedOut: boolean }>("/api/admin/auth/password", {
+    method: "POST",
+    body: JSON.stringify(input),
+  })
 }
 
 export async function adminMe() {

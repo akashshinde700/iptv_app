@@ -80,9 +80,18 @@ enum AppConfig {
         }
         guard let url = URL(string: text),
               let scheme = url.scheme?.lowercased(),
-              scheme == "http" || scheme == "https",
               let host = url.host, !host.isEmpty
         else { return nil }
+
+        // IOS-05: the storefront must be https. Accepting `http://` here silently sent the whole
+        // session (cookie included) over cleartext to whatever the user typed. http stays
+        // available only for a local dev server in a debug build.
+        #if DEBUG
+        let isLocalDevHost = host == "localhost" || host == "127.0.0.1" || host.hasSuffix(".local")
+        #else
+        let isLocalDevHost = false
+        #endif
+        guard scheme == "https" || (scheme == "http" && isLocalDevHost) else { return nil }
 
         // Keep the base URL free of trailing slashes so path joins stay clean.
         var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
