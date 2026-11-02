@@ -133,7 +133,12 @@ export function MediaTitleView({ id }: { id: string }) {
   }
 
   const currentSource = sources?.sources[sourceIndex] ?? null;
-  const stream = currentSource
+  // Third-party embeds are documents, not streams: they go in an iframe, never into <video>.
+  // Only an absolute https URL is accepted, so a tampered API response cannot load a
+  // `javascript:` or `data:` document.
+  const embedUrl =
+    currentSource?.embed && /^https:\/\//.test(currentSource.url) ? currentSource.url : null;
+  const stream = currentSource && !currentSource.embed
     ? {
         id: currentSource.id,
         title: sources?.title ?? title.title,
@@ -188,6 +193,26 @@ export function MediaTitleView({ id }: { id: string }) {
               Try again
             </Button>
           </StateView>
+        )}
+
+        {!loadingSources && embedUrl && (
+          <div className="space-y-3">
+            <div className="overflow-hidden rounded-xl border border-white/10 bg-black">
+              <iframe
+                src={embedUrl}
+                title={currentSource?.server ? `${currentSource.server} player` : "Embedded player"}
+                className="aspect-video w-full"
+                allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+                allowFullScreen
+                referrerPolicy="no-referrer"
+                sandbox="allow-scripts allow-same-origin allow-presentation allow-forms"
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              No direct source worked for this title, so it is playing from {currentSource?.server ?? "a backup player"} —
+              a third-party website. If it does not start, pick another player above.
+            </p>
+          </div>
         )}
 
         {!loadingSources && stream && (

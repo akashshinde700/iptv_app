@@ -17,6 +17,8 @@
 import type { MediaCard, MediaContext, MediaDetail, MediaProvider, MediaHome, MediaSources, MediaSeason, MediaTab } from "./types";
 import { mediaId } from "./types";
 import { signedProxyPath } from "@/lib/server/proxy-sign";
+import { rankServers, fallbackServers } from "./nxsha-providers";
+import { embedFallbacks } from "./nxsha-embed";
 
 const NXSHA_BASE = process.env.NXSHA_BASE ?? "https://nxsha.space";
 const PASSPHRASE = process.env.NXSHA_AES_KEY ?? "f4488ab4da401203d23baa129fc546153898162524635d6776826d0c867ccaa3";
@@ -219,6 +221,39 @@ async function homeFeed(tabKey: string, country: string): Promise<Record<string,
   return transportGet(`/api/home-feed?tabKey=${encodeURIComponent(tabKey)}&country=${encodeURIComponent(country)}`);
 }
 
+/** Map nxsha's display-language names onto ISO-639 codes for `<track srclang>`. */
+const LANG_CODES: Record<string, string> = {
+  english: "en",
+  hindi: "hi",
+  tamil: "ta",
+  telugu: "te",
+  malayalam: "ml",
+  kannada: "kn",
+  bengali: "bn",
+  marathi: "mr",
+  punjabi: "pa",
+  urdu: "ur",
+  arabic: "ar",
+  spanish: "es",
+  french: "fr",
+  german: "de",
+  portuguese: "pt",
+  russian: "ru",
+  japanese: "ja",
+  korean: "ko",
+  chinese: "zh",
+  indonesian: "id",
+  thai: "th",
+  turkish: "tr",
+  vietnamese: "vi",
+};
+
+function langCode(language: string): string {
+  const key = language.trim().toLowerCase();
+  if (/^[a-z]{2,3}(-[a-z]{2,4})?$/i.test(key)) return key.slice(0, 5);
+  return LANG_CODES[key] ?? (key.slice(0, 5) || "und");
+}
+
 /* -------------------------------- provider -------------------------------- */
 
 const TABS: MediaHome["tabs"] = [
@@ -302,7 +337,10 @@ async function detail(ctx: MediaContext, id: string, season = 1): Promise<MediaD
 }
 
 async function sources(ctx: MediaContext, id: string, episode?: { season: number; episode: number }): Promise<MediaSources | null> {
-  const cached = sourceCache.get(id);
+  // Cache key includes the episode: keying on the title id alone served episode 1's sources
+  // (and its signed, ~90 s URLs) for every later episode of the same show.
+  const cacheKey = `${id}:s${episode?.season ?? 1}e${episode?.episode ?? 1}`;
+  const cached = sourceCache.get(cacheKey);
   if (cached && Date.now() - cached.at < SOURCE_TTL_MS) return cached.data;
 
   const parts = id.split(":");
@@ -313,8 +351,12 @@ async function sources(ctx: MediaContext, id: string, episode?: { season: number
   const ep = kind === "tv" ? (episode?.episode ?? 1) : 1;
 
   const serversPayload = await encrypted("/api/servers", { tmdbId, imdb_id: "", type: kind, season, episode: ep });
-  const servers = Array.isArray(serversPayload?.servers) ? (serversPayload!.servers as NxItem[]) : [];
-  const usable = servers.filter((s) => s.status !== "offline" && !s.isDisable).slice(0, MAX_SERVER_PROBES);
+  const rows = Array.isArray(serversPayload?.servers) ? (serversPayload!.servers as NxItem[]) : [];
+  // Ordering/capability logic lives in `nxsha-providers` (API hints first, catalogue taste second).
+  const ranked = rankServers(rows, kind, { anime: kind === "tv" });
+  // No server list at all (their `/api/servers` is the flakiest endpoint) → probe the known-good
+  // scrapers rather than telling the viewer the title has no source.
+  const usable = (rows.length === 0 ? fallbackServers() : ranked).slice(0, MAX_SERVER_PROBES);
 
   const [subtitlesPayload, ...probeResults] = await Promise.all([
     encrypted("/api/subtitles", { tmdbId, imdb_id: "", type: kind, season, episode: ep }),
@@ -334,12 +376,20 @@ async function sources(ctx: MediaContext, id: string, episode?: { season: number
   const subtitles = (
     Array.isArray(subtitlesPayload?.subtitles) ? (subtitlesPayload!.subtitles as NxItem[]) : []
   )
-    .map((s, index) => ({
-      id: String(s.id ?? index),
-      label: String(s.label ?? s.language ?? s.lang ?? "Subtitle"),
-      lang: String(s.lang ?? s.language ?? "und").slice(0, 5),
-      url: String(s.url ?? s.file ?? ""),
-    }))
+    .map((s, index) => {
+      // nxsha's payload uses `language` (a display name) and `uri`. Reading `url`/`file` only —
+      // as an earlier version did — silently dropped every track. The file host also sends no
+      // CORS headers, so the browser cannot load it cross-origin from a <track>: it goes through
+      // our signed, same-origin proxy just like the video does.
+      const raw = String(s.uri ?? s.url ?? s.file ?? "");
+      const language = String(s.language ?? s.lang ?? "Unknown");
+      return {
+        id: String(s.id ?? index),
+        label: String(s.label ?? language),
+        lang: langCode(language),
+        url: raw ? signedProxyPath(raw, UA, `${NXSHA_BASE}/`, 6 * 60 * 60 * 1000) : "",
+      };
+    })
     .filter((s) => s.url.length > 0);
 
   const out: MediaSources = { title: cardCache.get(id)?.title ?? "Stream", startAt: 0, sources: [] };
@@ -362,8 +412,15 @@ async function sources(ctx: MediaContext, id: string, episode?: { season: number
     }
   });
 
+  // Everything failed: hand over the third-party embeds the reference site falls back to, so the
+  // viewer still gets a picture. They are flagged `embed` and never touch the hls.js pipeline.
+  if (out.sources.length === 0) {
+    out.sources.push(...embedFallbacks(tmdbId, kind, season, ep));
+    out.title = cardCache.get(id)?.title ?? "Stream";
+  }
+
   const data = out.sources.length > 0 ? out : null;
-  sourceCache.set(id, { at: Date.now(), data });
+  sourceCache.set(cacheKey, { at: Date.now(), data });
   return data;
 }
 

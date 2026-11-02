@@ -69,9 +69,11 @@ export interface MediaSource {
   label: string;
   quality: string | null;
   type: "hls" | "file";
-  /** opaque same-origin /api/proxy path */
+  /** opaque same-origin /api/proxy path, or an absolute https URL when `embed` is set */
   url: string;
   subtitles: MediaSubtitle[];
+  /** third-party iframe player fallback — render in an iframe, never in the video element */
+  embed?: boolean;
 }
 
 export interface MediaSources {

@@ -84,9 +84,16 @@ export interface MediaSource {
   label: string;
   quality: string | null;
   type: "hls" | "file";
-  /** signed same-origin proxy path — never the raw upstream URL */
+  /**
+   * Signed same-origin proxy path — never a raw upstream URL.
+   * The one exception is a third-party embed player, which is an absolute https URL by design
+   * (an iframe needs a real document); such sources are flagged `embed` and must never be
+   * handed to the hls.js player.
+   */
   url: string;
   subtitles: MediaSubtitle[];
+  /** last-resort third-party iframe player, only emitted when every scraper failed */
+  embed?: boolean;
 }
 
 export interface MediaSources {
